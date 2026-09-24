@@ -10,6 +10,9 @@ import { CourseOfferingsModule } from './course-offerings/course-offerings.modul
 import { EnrollmentsModule } from './enrollments/enrollments.module';
 import { UsersModule } from './users/users.module';
 import { SurveysModule } from './surveys/surveys.module';
+import { SurveyVersionsModule } from './survey-versions/survey-versions.module';
+import { QuestionsModule } from './questions/questions.module';
+import { EvaluationsModule } from './evaluations/evaluations.module';
 
 @Module({
   imports: [
@@ -22,6 +25,9 @@ import { SurveysModule } from './surveys/surveys.module';
     EnrollmentsModule,
     UsersModule,
     SurveysModule,
+    SurveyVersionsModule,
+    QuestionsModule,
+    EvaluationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
