@@ -1,6 +1,24 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+
 import { AuthGuard } from '@nestjs/passport';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+
 import { SurveyVersionsService } from './survey-versions.service';
 import { CreateSurveyVersionDto } from './dto/create-survey-version.dto';
 import { ParseBigIntPipe } from '../common/pipes/parse-bigint.pipe';
@@ -19,13 +37,20 @@ export class SurveyVersionsController {
 
   @Get()
   @ApiOperation({ summary: 'List versions of a survey' })
+  @ApiResponse({
+    status: 200,
+    description: 'Survey versions returned successfully',
+  })
   @ApiResponse({ status: 404, description: 'Survey not found' })
   findAll(@Param('surveyId', ParseBigIntPipe) surveyId: bigint) {
     return this.versionsService.findAllForSurvey(surveyId);
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create the next DRAFT version (optionally copying the latest questions)' })
+  @ApiOperation({
+    summary:
+      'Create the next DRAFT version (optionally copying the latest questions)',
+  })
   @ApiResponse({ status: 201, description: 'Version created' })
   @ApiResponse({ status: 404, description: 'Survey not found' })
   create(
@@ -39,6 +64,10 @@ export class SurveyVersionsController {
   @Get(':versionId')
   @ApiOperation({ summary: 'Get one version with its questions' })
   @ApiParam({ name: 'versionId', type: String, example: '1' })
+  @ApiResponse({
+    status: 200,
+    description: 'Survey version returned successfully',
+  })
   @ApiResponse({ status: 404, description: 'Survey version not found' })
   findOne(
     @Param('surveyId', ParseBigIntPipe) surveyId: bigint,
@@ -51,6 +80,10 @@ export class SurveyVersionsController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Archive a version so it is no longer used' })
   @ApiParam({ name: 'versionId', type: String, example: '1' })
+  @ApiResponse({
+    status: 200,
+    description: 'Survey version archived successfully',
+  })
   @ApiResponse({ status: 404, description: 'Survey version not found' })
   @ApiResponse({ status: 409, description: 'Already archived' })
   archive(
@@ -62,10 +95,20 @@ export class SurveyVersionsController {
 
   @Delete(':versionId')
   @HttpCode(204)
-  @ApiOperation({ summary: 'Delete a version that is not locked and not used by any evaluation' })
+  @ApiOperation({
+    summary:
+      'Delete a version that is not locked and not used by any evaluation',
+  })
   @ApiParam({ name: 'versionId', type: String, example: '1' })
+  @ApiResponse({
+    status: 204,
+    description: 'Survey version deleted successfully',
+  })
   @ApiResponse({ status: 404, description: 'Survey version not found' })
-  @ApiResponse({ status: 409, description: 'Version is locked or used by evaluations' })
+  @ApiResponse({
+    status: 409,
+    description: 'Version is locked or used by evaluations',
+  })
   async remove(
     @Param('surveyId', ParseBigIntPipe) surveyId: bigint,
     @Param('versionId', ParseBigIntPipe) versionId: bigint,
