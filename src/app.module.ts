@@ -15,6 +15,8 @@ import { QuestionsModule } from './questions/questions.module';
 import { EvaluationsModule } from './evaluations/evaluations.module';
 import { StudentAccessModule } from './student-access/student-access.module';
 import { SubmissionsModule } from './submissions/submissions.module';
+import { LecturerDashboardModule } from './lecturer-dashboard/lecturer-dashboard.module';
+import { CommentsModule } from './comments/comments.module';
 
 @Module({
   imports: [
@@ -32,6 +34,8 @@ import { SubmissionsModule } from './submissions/submissions.module';
     EvaluationsModule,
     StudentAccessModule,
     SubmissionsModule,
+    LecturerDashboardModule,
+    CommentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
