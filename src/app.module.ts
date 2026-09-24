@@ -13,6 +13,8 @@ import { SurveysModule } from './surveys/surveys.module';
 import { SurveyVersionsModule } from './survey-versions/survey-versions.module';
 import { QuestionsModule } from './questions/questions.module';
 import { EvaluationsModule } from './evaluations/evaluations.module';
+import { StudentAccessModule } from './student-access/student-access.module';
+import { SubmissionsModule } from './submissions/submissions.module';
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { EvaluationsModule } from './evaluations/evaluations.module';
     SurveyVersionsModule,
     QuestionsModule,
     EvaluationsModule,
+    StudentAccessModule,
+    SubmissionsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
