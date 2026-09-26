@@ -8,15 +8,16 @@ import { AppModule } from '../src/app.module';
   return this.toString();
 };
 
-describe('Courses (e2e)', () => {
+describe('Semesters (e2e)', () => {
   let app: INestApplication;
   let adminToken: string;
   let studentToken: string;
   let lecturerToken: string;
-  let createdCourseId: string;
+  let createdSemesterId: string;
 
-  // Unique code per test run, so re-running tests never collides with a leftover row
-  const testCourseCode = `E2E-${Date.now()}`;
+  // Unique name per test run, so re-running never collides with a leftover row
+  const testSemesterName = `E2E-${Date.now()}`;
+  const testYear = '2025-2026';
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -43,154 +44,156 @@ describe('Courses (e2e)', () => {
     await app.close();
   });
 
-  describe('POST /api/courses', () => {
-    it('ADMIN can create a course -> 201', async () => {
+  describe('POST /api/semesters', () => {
+    it('ADMIN can create a semester -> 201', async () => {
       const res = await request(app.getHttpServer())
-        .post('/api/courses')
+        .post('/api/semesters')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ course_code: testCourseCode, course_name: 'E2E Test Course' });
+        .send({
+          semester_name: testSemesterName,
+          academic_year: testYear,
+          start_date: '2026-03-01',
+          end_date: '2026-07-31',
+        });
 
       expect(res.status).toBe(201);
-      expect(res.body.course_code).toBe(testCourseCode);
-      createdCourseId = res.body.id;
+      expect(res.body.semester_name).toBe(testSemesterName);
+      createdSemesterId = res.body.id;
     });
 
     it('STUDENT is blocked from creating -> 403', async () => {
       const res = await request(app.getHttpServer())
-        .post('/api/courses')
+        .post('/api/semesters')
         .set('Authorization', `Bearer ${studentToken}`)
-        .send({ course_code: 'SHOULD-FAIL', course_name: 'Nope' });
+        .send({ semester_name: 'Nope', academic_year: testYear });
 
       expect(res.status).toBe(403);
     });
 
     it('LECTURER is blocked from creating -> 403', async () => {
       const res = await request(app.getHttpServer())
-        .post('/api/courses')
+        .post('/api/semesters')
         .set('Authorization', `Bearer ${lecturerToken}`)
-        .send({ course_code: 'SHOULD-FAIL-2', course_name: 'Nope' });
+        .send({ semester_name: 'Nope', academic_year: testYear });
 
       expect(res.status).toBe(403);
     });
 
-    it('rejects an empty course_code -> 400', async () => {
+    it('rejects an empty semester_name -> 400', async () => {
       const res = await request(app.getHttpServer())
-        .post('/api/courses')
+        .post('/api/semesters')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ course_code: '', course_name: 'Bad' });
+        .send({ semester_name: '', academic_year: testYear });
 
       expect(res.status).toBe(400);
     });
 
-    it('rejects a duplicate course_code -> 409', async () => {
+    it('rejects an invalid date string -> 400', async () => {
       const res = await request(app.getHttpServer())
-        .post('/api/courses')
+        .post('/api/semesters')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ course_code: testCourseCode, course_name: 'Duplicate' });
+        .send({ semester_name: 'Bad Date', academic_year: testYear, start_date: 'not-a-date' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects end_date before start_date -> 400', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/semesters')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          semester_name: 'Backwards',
+          academic_year: testYear,
+          start_date: '2026-07-31',
+          end_date: '2026-03-01',
+        });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects a duplicate semester_name + academic_year -> 409', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/semesters')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ semester_name: testSemesterName, academic_year: testYear });
 
       expect(res.status).toBe(409);
     });
   });
 
-  describe('GET /api/courses', () => {
-    it('STUDENT can list courses -> 200', async () => {
+  describe('GET /api/semesters', () => {
+    it('STUDENT can list semesters -> 200', async () => {
       const res = await request(app.getHttpServer())
-        .get('/api/courses')
+        .get('/api/semesters')
         .set('Authorization', `Bearer ${studentToken}`);
 
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
     });
 
-    it('nonexistent course id -> 404', async () => {
+    it('nonexistent semester id -> 404', async () => {
       const res = await request(app.getHttpServer())
-        .get('/api/courses/999999')
+        .get('/api/semesters/999999')
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(res.status).toBe(404);
     });
   });
 
-  describe('PUT /api/courses/:id', () => {
+  describe('PUT /api/semesters/:id', () => {
     it('STUDENT is blocked from updating -> 403', async () => {
       const res = await request(app.getHttpServer())
-        .put(`/api/courses/${createdCourseId}`)
+        .put(`/api/semesters/${createdSemesterId}`)
         .set('Authorization', `Bearer ${studentToken}`)
-        .send({ course_name: 'Hacked' });
+        .send({ semester_name: 'Hacked' });
 
       expect(res.status).toBe(403);
     });
 
-    it('LECTURER is blocked from updating -> 403', async () => {
+    it('rejects an end_date earlier than the saved start_date -> 400', async () => {
+      // Only end_date is sent; the service must compare it to the start_date already stored (2026-03-01)
       const res = await request(app.getHttpServer())
-        .put(`/api/courses/${createdCourseId}`)
-        .set('Authorization', `Bearer ${lecturerToken}`)
-        .send({ course_name: 'Hacked2' });
-
-      expect(res.status).toBe(403);
-    });
-
-    it('rejects an empty course_code on update -> 400', async () => {
-      const res = await request(app.getHttpServer())
-        .put(`/api/courses/${createdCourseId}`)
+        .put(`/api/semesters/${createdSemesterId}`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ course_code: '' });
+        .send({ end_date: '2026-01-01' });
 
       expect(res.status).toBe(400);
     });
 
     it('ADMIN can update -> 200', async () => {
       const res = await request(app.getHttpServer())
-        .put(`/api/courses/${createdCourseId}`)
+        .put(`/api/semesters/${createdSemesterId}`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ course_name: 'E2E Updated' });
+        .send({ end_date: '2026-08-15' });
 
       expect(res.status).toBe(200);
-      expect(res.body.course_name).toBe('E2E Updated');
+      expect(res.body.end_date).toBe('2026-08-15T00:00:00.000Z');
     });
   });
 
-  describe('DELETE /api/courses/:id', () => {
+  describe('DELETE /api/semesters/:id', () => {
+    it('cannot delete a semester used by course offerings -> 409', async () => {
+      const res = await request(app.getHttpServer())
+        .delete('/api/semesters/1')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(409);
+    });
+
     it('STUDENT is blocked from deleting -> 403', async () => {
       const res = await request(app.getHttpServer())
-        .delete(`/api/courses/${createdCourseId}`)
+        .delete(`/api/semesters/${createdSemesterId}`)
         .set('Authorization', `Bearer ${studentToken}`);
 
       expect(res.status).toBe(403);
     });
 
-    it('ADMIN can delete -> 204', async () => {
+    it('ADMIN can delete an unused semester -> 204', async () => {
       const res = await request(app.getHttpServer())
-        .delete(`/api/courses/${createdCourseId}`)
+        .delete(`/api/semesters/${createdSemesterId}`)
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(res.status).toBe(204);
-    });
-  });
-
-  describe('Auth', () => {
-    it('wrong password -> 401', async () => {
-      const res = await request(app.getHttpServer())
-        .post('/api/auth/login')
-        .send({ email: 'admin@itc.edu.kh', password: 'wrongpassword' });
-
-      expect(res.status).toBe(401);
-    });
-
-    it('GET /api/auth/me returns the logged-in user -> 200', async () => {
-      const res = await request(app.getHttpServer())
-        .get('/api/auth/me')
-        .set('Authorization', `Bearer ${adminToken}`);
-
-      expect(res.status).toBe(200);
-      expect(res.body.email).toBe('admin@itc.edu.kh');
-      expect(res.body.role).toBe('ADMIN');
-    });
-
-    it('GET /api/auth/me without a token -> 401', async () => {
-      const res = await request(app.getHttpServer()).get('/api/auth/me');
-
-      expect(res.status).toBe(401);
     });
   });
 });

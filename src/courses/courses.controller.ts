@@ -1,9 +1,12 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put } from '@nestjs/common';
-import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CoursesService } from './courses.service';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
 import { ParseBigIntPipe } from '../common/pipes/parse-bigint.pipe';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 
 const courseExample = {
   id: '1',
@@ -15,6 +18,8 @@ const courseExample = {
 };
 
 @ApiTags('courses')
+@ApiBearerAuth()
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('courses')
 export class CoursesController {
   constructor(private coursesService: CoursesService) {}
@@ -44,6 +49,7 @@ export class CoursesController {
   }
 
   @Post()
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Create a course' })
   @ApiResponse({ status: 201, description: 'Course created', schema: { example: courseExample } })
   @ApiResponse({
@@ -56,6 +62,7 @@ export class CoursesController {
   }
 
   @Put(':id')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Update a course' })
   @ApiParam({ name: 'id', type: String, example: '1' })
   @ApiResponse({
@@ -78,6 +85,7 @@ export class CoursesController {
   }
 
   @Delete(':id')
+  @Roles('ADMIN')
   @HttpCode(204)
   @ApiOperation({ summary: 'Delete a course' })
   @ApiParam({ name: 'id', type: String, example: '1' })
