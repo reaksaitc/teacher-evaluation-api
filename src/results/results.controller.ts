@@ -13,7 +13,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ParseBigIntPipe } from '../common/pipes/parse-bigint.pipe';
-import { assertWholeAnonymousAggregate } from '../common/utils/anonymous-report-scope.util';
+import { anonymousMajorFilter } from '../common/utils/anonymous-report-scope.util';
 import {
   capturedTargetLabelExample,
   legacyTargetLabelExample,
@@ -61,9 +61,29 @@ export class AdminResultsController {
     status: 400,
     description: 'UNSUPPORTED_ANONYMOUS_SCOPE: query slicing is unsupported',
   })
-  getAllResults(@Query() query: Record<string, unknown> = {}) {
-    assertWholeAnonymousAggregate(query);
-    return this.resultsService.getAdminResults();
+  getAllResults(
+    @Query() query: Record<string, unknown> = {},
+    @CurrentUser() actor: { id: bigint },
+  ) {
+    return this.resultsService.getAdminResults(
+      anonymousMajorFilter(query),
+      actor.id,
+    );
+  }
+
+  @Get('export')
+  @ApiOperation({
+    summary:
+      'Export the same authorized aggregate dataset with the same optional major_id filter and captured labels',
+  })
+  exportResults(
+    @Query() query: Record<string, unknown> = {},
+    @CurrentUser() actor: { id: bigint },
+  ) {
+    return this.resultsService.getAdminResults(
+      anonymousMajorFilter(query),
+      actor.id,
+    );
   }
 
   /**
@@ -72,6 +92,23 @@ export class AdminResultsController {
    * Returns anonymous aggregated results
    * for one lecturer.
    */
+  @Get(':lecturerId/export')
+  @ApiOperation({
+    summary:
+      'Export one lecturer aggregate dataset with captured major filter labels',
+  })
+  exportLecturer(
+    @Param('lecturerId', ParseBigIntPipe) lecturerId: bigint,
+    @Query() query: Record<string, unknown> = {},
+    @CurrentUser() actor: { id: bigint },
+  ) {
+    return this.resultsService.getAdminResultsByLecturer(
+      lecturerId,
+      anonymousMajorFilter(query),
+      actor.id,
+    );
+  }
+
   @Get(':lecturerId')
   @ApiOperation({
     summary: 'Get anonymous evaluation results for one lecturer',
@@ -87,9 +124,13 @@ export class AdminResultsController {
     @Param('lecturerId', ParseBigIntPipe)
     lecturerId: bigint,
     @Query() query: Record<string, unknown> = {},
+    @CurrentUser() actor: { id: bigint },
   ) {
-    assertWholeAnonymousAggregate(query);
-    return this.resultsService.getAdminResultsByLecturer(lecturerId);
+    return this.resultsService.getAdminResultsByLecturer(
+      lecturerId,
+      anonymousMajorFilter(query),
+      actor.id,
+    );
   }
 }
 
@@ -104,6 +145,21 @@ export class AdminResultsController {
 @Controller('lecturer/results')
 export class LecturerResultsController {
   constructor(private readonly resultsService: ResultsService) {}
+
+  @Get('export')
+  @ApiOperation({
+    summary:
+      'Export my released aggregate results with the same optional captured-major filter',
+  })
+  exportMine(
+    @CurrentUser() actor: { id: bigint },
+    @Query() query: Record<string, unknown> = {},
+  ) {
+    return this.resultsService.getLecturerResults(
+      actor.id,
+      anonymousMajorFilter(query),
+    );
+  }
 
   /**
    * GET /lecturer/results
@@ -141,7 +197,9 @@ export class LecturerResultsController {
     currentUser: { id: bigint },
     @Query() query: Record<string, unknown> = {},
   ) {
-    assertWholeAnonymousAggregate(query);
-    return this.resultsService.getLecturerResults(currentUser.id);
+    return this.resultsService.getLecturerResults(
+      currentUser.id,
+      anonymousMajorFilter(query),
+    );
   }
 }

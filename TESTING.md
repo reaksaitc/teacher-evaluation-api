@@ -2,6 +2,26 @@
 
 Use this guide to evaluate every backend feature with repeatable steps and recorded evidence. It describes this repository's current tests and contracts; it is not a claim of certification or complete frontend acceptance.
 
+For the latest `improve.txt` A–S contracts and coverage, see [backend alignment contracts](docs/BACKEND_ALIGNMENT_CONTRACTS.md). Counts and database alignment statements elsewhere in this guide describe the earlier delivery.
+
+### Isolated alignment regression database
+
+If the shared local test database has migrations from another checkout, use a separate database instead of resetting it. The existing `.env.test.local` must still reference the guarded local `teacher_evaluation_test` database. From this repository:
+
+```powershell
+npm.cmd run test:alignment:prepare
+$env:TEST_DATABASE_SUFFIX = 'alignment'
+npm.cmd run test:e2e:migrate
+npm.cmd run test:e2e:seed
+npm.cmd test -- --runInBand
+npm.cmd run test:e2e
+npm.cmd run build
+npm.cmd run lint
+Remove-Item Env:TEST_DATABASE_SUFFIX
+```
+
+Preparation creates only `teacher_evaluation_test_alignment` if absent, without resetting it or resolving migration failures. The suffix runner validates the local base configuration before selecting `teacher_evaluation_test_<suffix>`. Migration, seeding, and API tests then use that database. Seeds restore synthetic test accounts; coordinate with anyone sharing the selected test database. First-administrator tests additionally create and remove their own exact disposable database; the test operator needs local database-creation permission. No normal installation credentials or data are used.
+
 ## 1. Test environment
 
 ### Frontend team preview from the GitHub repository
@@ -40,10 +60,10 @@ Record the Git commit/branch, local test results and API acceptance cases. This 
 
 Run commands from `D:\internship\teacher-evaluation-api` in PowerShell. Dependencies and PostgreSQL must be available. The test runner requires Node.js 20.12 or newer; use the project's installed compatible runtime.
 
-| Database | Use during testing |
-| --- | --- |
-| `teacher_evaluation_test` | Automated API tests and manual tests with synthetic data. |
-| `teacher_evaluation` | Normal backend database. Do not use it for destructive test cases. |
+| Database                  | Use during testing                                                 |
+| ------------------------- | ------------------------------------------------------------------ |
+| `teacher_evaluation_test` | Automated API tests and manual tests with synthetic data.          |
+| `teacher_evaluation`      | Normal backend database. Do not use it for destructive test cases. |
 
 `.env.test.local` must contain `NODE_ENV=test`, `DB_NAME=teacher_evaluation_test`, and a `DATABASE_URL` pointing to that database on `localhost` or `127.0.0.1`. It also needs the app configuration, including JWT settings. Keep credentials private. `DB_NAME` and `DATABASE_URL` refer to the same database, not two databases.
 
@@ -115,14 +135,14 @@ The updated backend needs migration `20261007140000_add_reviewed_operations` on 
 
 For each workflow, first call its preview as ADMIN, inspect the exact selection/impact, then confirm with that fresh `review_id` and unchanged input. Review IDs are UUIDs, not account IDs. Enrollment, targeting and reassignment use account IDs; bulk placement uses profile IDs.
 
-| Workflow | Preview | Confirmation |
-| --- | --- | --- |
-| Enrollment | POST `/api/course-offerings/:id/enrollments/preview` | POST `/api/course-offerings/:id/enrollments/bulk`, same selection/account IDs plus review_id. |
-| Evaluation creation | POST `/api/evaluations/create-preview`, explicit latest version and full creation input. | POST `/api/evaluations`, unchanged creation fields plus confirmed_student_ids/review_id. |
-| Reassignment | POST `/api/course-offerings/:id/enrollments/reassignment/preview` | POST `/reassignment/confirm`, same account/target/source-enrollment ID plus review_id. |
-| Bulk placement | POST `/api/students/bulk/class-group/preview` | POST `/api/students/bulk/class-group/confirm`, same academic year/profile IDs/group plus review_id. |
-| Assigned-version opening | POST `/api/evaluations/:id/open/preview` | POST `/api/evaluations/:id/open/confirm`, review_id, explicit decision and assigned version ID. |
-| Latest application | POST `/api/surveys/:id/versions/:versionId/apply-to-unfinished/preview` | POST the same path ending `/confirm`, with review_id. |
+| Workflow                 | Preview                                                                                  | Confirmation                                                                                        |
+| ------------------------ | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Enrollment               | POST `/api/course-offerings/:id/enrollments/preview`                                     | POST `/api/course-offerings/:id/enrollments/bulk`, same selection/account IDs plus review_id.       |
+| Evaluation creation      | POST `/api/evaluations/create-preview`, explicit latest version and full creation input. | POST `/api/evaluations`, unchanged creation fields plus confirmed_student_ids/review_id.            |
+| Reassignment             | POST `/api/course-offerings/:id/enrollments/reassignment/preview`                        | POST `/reassignment/confirm`, same account/target/source-enrollment ID plus review_id.              |
+| Bulk placement           | POST `/api/students/bulk/class-group/preview`                                            | POST `/api/students/bulk/class-group/confirm`, same academic year/profile IDs/group plus review_id. |
+| Assigned-version opening | POST `/api/evaluations/:id/open/preview`                                                 | POST `/api/evaluations/:id/open/confirm`, review_id, explicit decision and assigned version ID.     |
+| Latest application       | POST `/api/surveys/:id/versions/:versionId/apply-to-unfinished/preview`                  | POST the same path ending `/confirm`, with review_id.                                               |
 
 Check these in order: unchanged confirmation succeeds; same-ID relevant placement/impact drift conflicts; unrelated account name/notes changes do not conflict; wrong input/resource/caller and expiry reject; completed retry returns original counts/IDs with `already_applied=true`. Creation additionally binds selected generation/major/year labels: renaming these before confirmation requires a fresh review. Create another eligible student or remove a protected draft after completion, then retry: that new eligibility must not expand the old operation. A fresh preview is a separate operation. For retention, also close the evaluation after success and retry; it must stay CLOSED. For placement, make a later correction and retry; it must not undo the correction.
 
@@ -140,15 +160,15 @@ The focused run has 19 cases; the other 67 consistency cases are skipped by this
 
 For each operation, cover these applicable categories:
 
-| Category | What to check |
-| --- | --- |
-| Valid flow | Correct role, valid data, expected response and exact intended database change. |
-| Invalid input | Missing required fields, malformed IDs, wrong types, invalid dates/enums and boundary values. |
-| Authentication and authorization | Missing/invalid/revoked token, wrong role, another user's or lecturer's resource. |
-| Duplicate and missing resource | Duplicate create/submit, unknown ID, deleted or unavailable dependency. |
-| State and history | Archived sets, DRAFT/OPEN/CLOSED evaluations, saved drafts, completed work, preserved historical IDs. |
-| Concurrency and rollback | Overlapping writes cannot cause partial changes, duplicate responses or lost updates. |
-| Privacy and response contract | Correct field types, pagination/filter behavior, no credential leaks or response-to-student linkage. |
+| Category                         | What to check                                                                                         |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Valid flow                       | Correct role, valid data, expected response and exact intended database change.                       |
+| Invalid input                    | Missing required fields, malformed IDs, wrong types, invalid dates/enums and boundary values.         |
+| Authentication and authorization | Missing/invalid/revoked token, wrong role, another user's or lecturer's resource.                     |
+| Duplicate and missing resource   | Duplicate create/submit, unknown ID, deleted or unavailable dependency.                               |
+| State and history                | Archived sets, DRAFT/OPEN/CLOSED evaluations, saved drafts, completed work, preserved historical IDs. |
+| Concurrency and rollback         | Overlapping writes cannot cause partial changes, duplicate responses or lost updates.                 |
+| Privacy and response contract    | Correct field types, pagination/filter behavior, no credential leaks or response-to-student linkage.  |
 
 Record: case ID, feature/requirement, role, preconditions, fixture IDs, request/steps, expected HTTP status/body, expected database change, actual result, evidence, and status. Use **PASS**, **FAIL**, **BLOCKED**, or **NOT TESTED**. An unspecified school policy is BLOCKED, not PASS.
 
@@ -160,40 +180,40 @@ For every rejected mutation, verify that no unintended row, answer, enrollment o
 
 All route prefixes below start with `/api`. "No dedicated API suite" means other tests may use the feature as setup, but that is not a complete test of its endpoints. A controller test that only checks `should be defined` does not prove HTTP behavior.
 
-| Feature / route | Required evaluation cases | Existing automated starting point |
-| --- | --- | --- |
-| Startup, Prisma, health, Swagger | Test database connection; `/health`; `/docs`; BigInt IDs serialize as strings; validation strips unknown fields; browser CORS for allowed frontend origin. | `src/app.controller.spec.ts`; API suites exercise startup/Prisma. Bootstrap/Swagger/CORS need separate manual verification. |
-| Authentication `/auth` | Email and student-code login; wrong password; inactive account; `/me`; password change, old token revocation, password boundaries and sixth password-change attempt in a minute. | `src/auth/*.spec.ts`, password guard spec, Auth cases in `test/app.e2e-spec.ts`. Full password HTTP flow needs additional evaluation. |
-| Users `/users` | Account CRUD, search/pagination, duplicate email/code, role/status changes, protected deletion, department membership and primary department. | `src/users/*.spec.ts`, `test/users.e2e-spec.ts`. |
-| Departments `/departments` | CRUD, duplicate code/name rules, status, unknown ID, deletion with dependents, non-admin writes denied. | `src/departments/*.spec.ts`; no dedicated API suite. |
-| Majors `/majors` | CRUD, department association, duplicate code, missing department, dependent deletion. | `src/majors/*.spec.ts`; no dedicated API suite. |
-| Academic years `/academic-years` | CRUD, start year, active-year rules, duplicate names, dependent deletion, historical preservation. | `src/academic-years/*.spec.ts`; no dedicated API suite. |
-| Semesters `/semesters` | Explicit semester number within academic year, duplicate context, missing year, date validation and dependent deletion. | `src/semesters/semesters.service.spec.ts`, `test/semesters.e2e-spec.ts`. |
-| Student generations `/student-generations` | CRUD, entry year association, duplicates, effective year calculation, protected deletion. | `src/student-generations/*.spec.ts`; no dedicated API suite. |
-| Students `/students` | Atomic account/profile/initial placement creation, optional fields, duplicates, selected-year filters, normalized group options, update/delete protections. | `src/students/students.service.spec.ts`; consistency cases cover selected flows. No dedicated CRUD API suite. |
-| Academic records `/student-academic-records` | One placement per student/year, explicit major/group/year level, 1 and 5 boundaries, reject 0/6, selected-year override, later changes preserve past assignments. | `src/student-academic-records/*.spec.ts`, related students specs; no dedicated API suite. |
-| Bulk class group `/students/bulk/class-group` | Exact profile IDs and selected year, normalized group, all-or-nothing if any placement is missing, race with individual edit, no automatic enrollment move. | Students service spec and `test/consistency.e2e-spec.ts`. |
-| Import `/students/import` | Valid rows, duplicate normalized codes, existing account skipped, unknown/ambiguous major, password bounds, row failure reporting without partial account/profile. Successful other rows remain imported by design. | `src/students/student-import.service.spec.ts`; no dedicated API suite. |
-| Export `/students/export` | Correct year/semester/group scope, empty scope, progress totals, context required, no passwords or anonymous answer linkage. Participation export is identifiable staff data and must remain ADMIN-only. | `src/students/student-export.service.spec.ts`; no dedicated API suite. |
-| Student progress | Active versus upcoming/expired/CLOSED evaluations, submitted counts, deduplication and zero denominator, selected placement context. | `src/students/student-evaluation-progress.service.spec.ts`; verify fields through student list/detail/export HTTP responses. |
-| Courses `/courses` | CRUD, duplicate course code, input validation, protected dependent deletion, authorization. | Courses cases in `test/app.e2e-spec.ts`; no dedicated course service spec. |
-| Curriculum `/course-year-rules` | Course/major/year/class-type association, filtering, duplicates, invalid dependencies, year boundaries. Do not invent expected effective-year/revision rules. | `src/course-year-rules/course-year-rules.service.spec.ts`; no dedicated API suite. |
-| Offerings `/course-offerings` | Valid course/lecturer/semester/context, duplicate uniqueness, COURSE/TD/TP distinction, saved A-only/A+B scopes, update/delete protections. Section text cannot establish eligibility. | Course offerings service spec, `test/course-offerings.e2e-spec.ts`, consistency suite. |
-| Lecturer offerings `/lecturer/course-offerings` | Only owned offerings, filters and missing/wrong-role token. A second lecturer cannot see the first lecturer's assignments. | Lecturer offerings controller spec; no dedicated API suite for this route. |
-| Enrollment `/course-offerings/:offeringId/enrollments` | Single/bulk/preview use the same ACTIVE/year/generation/major/year-level/group rules; exact confirmed account IDs; A-only rejects B; A+B accepts both; duplicates and legacy no-scope behavior. | Enrollment service spec, `test/enrollments.e2e-spec.ts`, consistency suite. |
-| Reassignment under enrollment route | Preview/confirm only intended account; compatible saved scopes; protected draft/completed work; stale preview and concurrent draft saving; full rollback. | Enrollment service spec and consistency suite. |
-| Question sets `/surveys` | Atomic first version, title uniqueness, usage, update, archive, continuing existing assignments, reject new archived assignments, protected delete. | Survey lifecycle spec, `test/surveys.e2e-spec.ts`, consistency suite. |
-| Versions `/surveys/:surveyId/versions` | Clone preserves previous version, sequential version numbers, same-set ownership, archive/delete restrictions, latest checks, no silent empty-version fallback. | Version service/lifecycle specs, `test/survey-versions.e2e-spec.ts`, consistency suite. |
-| Apply newer version to unfinished | Preview exact proposed moved/skipped impact; confirm unchanged review; preserve drafts/completions/base versions; reject drift; safe NULL movement; no downgrade; overlapping save rollback; completed retry cannot move newly eligible users. | Version lifecycle spec and reviewed PostgreSQL consistency cases; actual frontend cutover pending. |
-| Questions `/survey-versions/:versionId/questions`, `/questions/:questionId` | All six types, valid options, type-specific bounds, option ownership, reorder uniqueness/atomicity; assigned and older questions immutable; edit/use race. | Question lifecycle spec, `test/questions.e2e-spec.ts`, `test/questions-reorder.e2e-spec.ts`, consistency suite. |
-| Evaluations `/evaluations` | Participant preview/exact confirmation, frozen targets, schedule validation, DRAFT -> OPEN -> CLOSED, stale version create/open, archived continuity, duplicate/delete restrictions. | Evaluation service/lifecycle specs, `test/evaluations.e2e-spec.ts`, consistency suite. |
-| Student access `/student/evaluations` | Assigned-only list/history/survey/status, correct effective version, active schedule, already submitted, inactive/nonparticipant/wrong role. | Student access service spec, `test/student-access.e2e-spec.ts`. |
-| Drafts `/student/evaluations/:id/draft` | Save/read/replace/delete, ownership, partial answer contract, all question types, version pinning, closed/unassigned access, saving after submit and races. | Draft service spec, `test/assessment-drafts.e2e-spec.ts`, consistency suite. |
-| Final response `/student/evaluations/:id/responses` | All required answers, six types, bounds/options/duplicate question rejection, active schedule, submit once, draft removed, exactly one anonymous response under concurrent submission. | Submission service spec, `test/submissions.e2e-spec.ts`, consistency suite. |
-| Lecturer dashboard `/lecturer/evaluations`, `/:id/dashboard` | Owned evaluations, response rate and counts, zero responses, OPEN/CLOSED visibility, other lecturer denied, actual submitted-version questions. | Dashboard service spec, `test/lecturer-dashboard.e2e-spec.ts`, consistency suite. |
-| Comments `/lecturer/evaluations/:id/comments` | Owned evaluation, only appropriate text answers, actual response version, no student linkage, missing/foreign resource. | `test/comments.e2e-spec.ts`, consistency suite; no dedicated comments service spec. |
-| Results `/admin/results`, `/admin/results/:lecturerId`, `/lecturer/results` | Role/ownership, hand-calculated aggregates, six types, V1/V2 separated, unknown version count explicit, no response-to-student linkage. Legacy dashboard flat shape is distinct from canonical per-version results. | Results service/controller specs and consistency suite; no dedicated API suite for complete results authorization/aggregation. |
-| Historical recovery operator tool | Synthetic records only: evidence required, ambiguous preserved, dry-run unchanged, apply/rollback idempotence, fingerprint drift rejects whole batch, timestamps/answers unchanged. | Recovery cases in `test/consistency.e2e-spec.ts`; CLI packaging/backup/restore needs separate operator evaluation. See recovery guide. |
+| Feature / route                                                             | Required evaluation cases                                                                                                                                                                                                                      | Existing automated starting point                                                                                                      |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Startup, Prisma, health, Swagger                                            | Test database connection; `/health`; `/docs`; BigInt IDs serialize as strings; validation strips unknown fields; browser CORS for allowed frontend origin.                                                                                     | `src/app.controller.spec.ts`; API suites exercise startup/Prisma. Bootstrap/Swagger/CORS need separate manual verification.            |
+| Authentication `/auth`                                                      | Email and student-code login; wrong password; inactive account; `/me`; password change, old token revocation, password boundaries and sixth password-change attempt in a minute.                                                               | `src/auth/*.spec.ts`, password guard spec, Auth cases in `test/app.e2e-spec.ts`. Full password HTTP flow needs additional evaluation.  |
+| Users `/users`                                                              | Account CRUD, search/pagination, duplicate email/code, role/status changes, protected deletion, department membership and primary department.                                                                                                  | `src/users/*.spec.ts`, `test/users.e2e-spec.ts`.                                                                                       |
+| Departments `/departments`                                                  | CRUD, duplicate code/name rules, status, unknown ID, deletion with dependents, non-admin writes denied.                                                                                                                                        | `src/departments/*.spec.ts`; no dedicated API suite.                                                                                   |
+| Majors `/majors`                                                            | CRUD, department association, duplicate code, missing department, dependent deletion.                                                                                                                                                          | `src/majors/*.spec.ts`; no dedicated API suite.                                                                                        |
+| Academic years `/academic-years`                                            | CRUD, start year, active-year rules, duplicate names, dependent deletion, historical preservation.                                                                                                                                             | `src/academic-years/*.spec.ts`; no dedicated API suite.                                                                                |
+| Semesters `/semesters`                                                      | Explicit semester number within academic year, duplicate context, missing year, date validation and dependent deletion.                                                                                                                        | `src/semesters/semesters.service.spec.ts`, `test/semesters.e2e-spec.ts`.                                                               |
+| Student generations `/student-generations`                                  | CRUD, entry year association, duplicates, effective year calculation, protected deletion.                                                                                                                                                      | `src/student-generations/*.spec.ts`; no dedicated API suite.                                                                           |
+| Students `/students`                                                        | Atomic account/profile/initial placement creation, optional fields, duplicates, selected-year filters, normalized group options, update/delete protections.                                                                                    | `src/students/students.service.spec.ts`; consistency cases cover selected flows. No dedicated CRUD API suite.                          |
+| Academic records `/student-academic-records`                                | One placement per student/year, explicit major/group/year level, 1 and 5 boundaries, reject 0/6, selected-year override, later changes preserve past assignments.                                                                              | `src/student-academic-records/*.spec.ts`, related students specs; no dedicated API suite.                                              |
+| Bulk class group `/students/bulk/class-group`                               | Exact profile IDs and selected year, normalized group, all-or-nothing if any placement is missing, race with individual edit, no automatic enrollment move.                                                                                    | Students service spec and `test/consistency.e2e-spec.ts`.                                                                              |
+| Import `/students/import`                                                   | Valid rows, duplicate normalized codes, existing account skipped, unknown/ambiguous major, password bounds, row failure reporting without partial account/profile. Successful other rows remain imported by design.                            | `src/students/student-import.service.spec.ts`; no dedicated API suite.                                                                 |
+| Export `/students/export`                                                   | Correct year/semester/group scope, empty scope, progress totals, context required, no passwords or anonymous answer linkage. Participation export is identifiable staff data and must remain ADMIN-only.                                       | `src/students/student-export.service.spec.ts`; no dedicated API suite.                                                                 |
+| Student progress                                                            | Active versus upcoming/expired/CLOSED evaluations, submitted counts, deduplication and zero denominator, selected placement context.                                                                                                           | `src/students/student-evaluation-progress.service.spec.ts`; verify fields through student list/detail/export HTTP responses.           |
+| Courses `/courses`                                                          | CRUD, duplicate course code, input validation, protected dependent deletion, authorization.                                                                                                                                                    | Courses cases in `test/app.e2e-spec.ts`; no dedicated course service spec.                                                             |
+| Curriculum `/course-year-rules`                                             | Course/major/year/class-type association, filtering, duplicates, invalid dependencies, year boundaries. Do not invent expected effective-year/revision rules.                                                                                  | `src/course-year-rules/course-year-rules.service.spec.ts`; no dedicated API suite.                                                     |
+| Offerings `/course-offerings`                                               | Valid course/lecturer/semester/context, duplicate uniqueness, COURSE/TD/TP distinction, saved A-only/A+B scopes, update/delete protections. Section text cannot establish eligibility.                                                         | Course offerings service spec, `test/course-offerings.e2e-spec.ts`, consistency suite.                                                 |
+| Lecturer offerings `/lecturer/course-offerings`                             | Only owned offerings, filters and missing/wrong-role token. A second lecturer cannot see the first lecturer's assignments.                                                                                                                     | Lecturer offerings controller spec; no dedicated API suite for this route.                                                             |
+| Enrollment `/course-offerings/:offeringId/enrollments`                      | Single/bulk/preview use the same ACTIVE/year/generation/major/year-level/group rules; exact confirmed account IDs; A-only rejects B; A+B accepts both; duplicates and legacy no-scope behavior.                                                | Enrollment service spec, `test/enrollments.e2e-spec.ts`, consistency suite.                                                            |
+| Reassignment under enrollment route                                         | Preview/confirm only intended account; compatible saved scopes; protected draft/completed work; stale preview and concurrent draft saving; full rollback.                                                                                      | Enrollment service spec and consistency suite.                                                                                         |
+| Question sets `/surveys`                                                    | Atomic first version, title uniqueness, usage, update, archive, continuing existing assignments, reject new archived assignments, protected delete.                                                                                            | Survey lifecycle spec, `test/surveys.e2e-spec.ts`, consistency suite.                                                                  |
+| Versions `/surveys/:surveyId/versions`                                      | Clone preserves previous version, sequential version numbers, same-set ownership, archive/delete restrictions, latest checks, no silent empty-version fallback.                                                                                | Version service/lifecycle specs, `test/survey-versions.e2e-spec.ts`, consistency suite.                                                |
+| Apply newer version to unfinished                                           | Preview exact proposed moved/skipped impact; confirm unchanged review; preserve drafts/completions/base versions; reject drift; safe NULL movement; no downgrade; overlapping save rollback; completed retry cannot move newly eligible users. | Version lifecycle spec and reviewed PostgreSQL consistency cases; actual frontend cutover pending.                                     |
+| Questions `/survey-versions/:versionId/questions`, `/questions/:questionId` | All six types, valid options, type-specific bounds, option ownership, reorder uniqueness/atomicity; assigned and older questions immutable; edit/use race.                                                                                     | Question lifecycle spec, `test/questions.e2e-spec.ts`, `test/questions-reorder.e2e-spec.ts`, consistency suite.                        |
+| Evaluations `/evaluations`                                                  | Participant preview/exact confirmation, frozen targets, schedule validation, DRAFT -> OPEN -> CLOSED, stale version create/open, archived continuity, duplicate/delete restrictions.                                                           | Evaluation service/lifecycle specs, `test/evaluations.e2e-spec.ts`, consistency suite.                                                 |
+| Student access `/student/evaluations`                                       | Assigned-only list/history/survey/status, correct effective version, active schedule, already submitted, inactive/nonparticipant/wrong role.                                                                                                   | Student access service spec, `test/student-access.e2e-spec.ts`.                                                                        |
+| Drafts `/student/evaluations/:id/draft`                                     | Save/read/replace/delete, ownership, partial answer contract, all question types, version pinning, closed/unassigned access, saving after submit and races.                                                                                    | Draft service spec, `test/assessment-drafts.e2e-spec.ts`, consistency suite.                                                           |
+| Final response `/student/evaluations/:id/responses`                         | All required answers, six types, bounds/options/duplicate question rejection, active schedule, submit once, draft removed, exactly one anonymous response under concurrent submission.                                                         | Submission service spec, `test/submissions.e2e-spec.ts`, consistency suite.                                                            |
+| Lecturer dashboard `/lecturer/evaluations`, `/:id/dashboard`                | Owned evaluations, response rate and counts, zero responses, OPEN/CLOSED visibility, other lecturer denied, actual submitted-version questions.                                                                                                | Dashboard service spec, `test/lecturer-dashboard.e2e-spec.ts`, consistency suite.                                                      |
+| Comments `/lecturer/evaluations/:id/comments`                               | Owned evaluation, only appropriate text answers, actual response version, no student linkage, missing/foreign resource.                                                                                                                        | `test/comments.e2e-spec.ts`, consistency suite; no dedicated comments service spec.                                                    |
+| Results `/admin/results`, `/admin/results/:lecturerId`, `/lecturer/results` | Role/ownership, hand-calculated aggregates, six types, V1/V2 separated, unknown version count explicit, no response-to-student linkage. Legacy dashboard flat shape is distinct from canonical per-version results.                            | Results service/controller specs and consistency suite; no dedicated API suite for complete results authorization/aggregation.         |
+| Historical recovery operator tool                                           | Synthetic records only: evidence required, ambiguous preserved, dry-run unchanged, apply/rollback idempotence, fingerprint drift rejects whole batch, timestamps/answers unchanged.                                                            | Recovery cases in `test/consistency.e2e-spec.ts`; CLI packaging/backup/restore needs separate operator evaluation. See recovery guide. |
 
 ## 5. Manual API evaluation with Swagger or Postman
 
@@ -208,12 +228,12 @@ This loads the validated test environment before starting NestJS. Normal `npm ru
 
 Open `http://localhost:3000/api/docs` (adjust the port if configured differently). The test seed provides these synthetic accounts with password `Password123`:
 
-| Role | Login identifier |
-| --- | --- |
-| ADMIN | `admin@itc.edu.kh` |
-| LECTURER | `sokdara@itc.edu.kh` |
-| Second LECTURER | `chanthy@itc.edu.kh` |
-| STUDENT | `student1@itc.edu.kh`, `student2@itc.edu.kh`, `student3@itc.edu.kh` |
+| Role            | Login identifier                                                    |
+| --------------- | ------------------------------------------------------------------- |
+| ADMIN           | `admin@itc.edu.kh`                                                  |
+| LECTURER        | `sokdara@itc.edu.kh`                                                |
+| Second LECTURER | `chanthy@itc.edu.kh`                                                |
+| STUDENT         | `student1@itc.edu.kh`, `student2@itc.edu.kh`, `student3@itc.edu.kh` |
 
 POST `/api/auth/login` with `{ "identifier": "admin@itc.edu.kh", "password": "Password123" }`. Copy `access_token` into Swagger Authorize. In Postman use Bearer Token authorization. Keep separate tokens for each role; repeat authorization checks with the second lecturer and another student.
 
@@ -240,16 +260,16 @@ For aggregate accuracy, prepare a tiny known dataset. For a rating question perm
 
 Run the full suites and then review these demonstrations against [the implementation review](docs/BACKEND_PROJECT_REPORT.md#7-backend-improvement-requirements-and-delivery-status):
 
-| Handoff requirement | Demonstration and remaining acceptance limit |
-| --- | --- |
-| 1. Eligibility | A-only versus A+B; wrong year/generation/major/year-level/group; inactive account; consistent single/bulk/reassignment behavior; documented legacy behavior. |
-| 2. Concurrency | Run reviewed consistency cases: same-ID context drift, unrelated-field allowance, expiry/caller/input/resource binding, durable exact retry, simultaneous confirmation and complete rollback. Verify bypass rejection with cutover enabled. |
-| 3. Questionnaire lifecycle | Ordinary stale opening conflicts; explicit reviewed retention opens valid assigned V1 with current V2; changed review conflicts; invalid dates/empty/archived versions fail; questions/membership remain protected. Reviewed creation requires explicit version; legacy mandatory selection awaits cutover. |
-| 4. Progression exceptions | Approved and implemented: test repeat/transfer from last approved placement, persistent pause and explicit resume, missing/null/blank annual group, cross-API agreement, stale reviewed confirmation and preservation. Twelve PostgreSQL cases and sixteen resolver cases pass; actual frontend acceptance remains pending. |
-| 5. Apply to unfinished | ADMIN preview/confirm, exact proposed/committed counts and skipped reasons, protected drafts/completions/base versions, same-set latest, safe NULL movement, race rollback and original receipt replay without additional movement. |
-| 6. Historical metadata | Synthetic recovery scenarios and truthful unversioned counts. Passing them does not authorize school data recovery or prove official provenance/backup recovery. |
+| Handoff requirement        | Demonstration and remaining acceptance limit                                                                                                                                                                                                                                                                                                                         |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Eligibility             | A-only versus A+B; wrong year/generation/major/year-level/group; inactive account; consistent single/bulk/reassignment behavior; documented legacy behavior.                                                                                                                                                                                                         |
+| 2. Concurrency             | Run reviewed consistency cases: same-ID context drift, unrelated-field allowance, expiry/caller/input/resource binding, durable exact retry, simultaneous confirmation and complete rollback. Verify bypass rejection with cutover enabled.                                                                                                                          |
+| 3. Questionnaire lifecycle | Ordinary stale opening conflicts; explicit reviewed retention opens valid assigned V1 with current V2; changed review conflicts; invalid dates/empty/archived versions fail; questions/membership remain protected. Reviewed creation requires explicit version; legacy mandatory selection awaits cutover.                                                          |
+| 4. Progression exceptions  | Approved and implemented: test repeat/transfer from last approved placement, persistent pause and explicit resume, missing/null/blank annual group, cross-API agreement, stale reviewed confirmation and preservation. Twelve PostgreSQL cases and sixteen resolver cases pass; actual frontend acceptance remains pending.                                          |
+| 5. Apply to unfinished     | ADMIN preview/confirm, exact proposed/committed counts and skipped reasons, protected drafts/completions/base versions, same-set latest, safe NULL movement, race rollback and original receipt replay without additional movement.                                                                                                                                  |
+| 6. Historical metadata     | Synthetic recovery scenarios and truthful unversioned counts. Passing them does not authorize school data recovery or prove official provenance/backup recovery.                                                                                                                                                                                                     |
 | 7. Curriculum/title policy | Approved academic-year revisions and global titles are implemented; 23 PostgreSQL cases pass. Test saved bindings, withdrawals/reapproval, stale selections, chronology, concurrent approvals and global/archived title collisions. Local normal migration is complete through 18 migrations; frontend adoption and another school target deployment remain pending. |
-| 8. Historical labels | Approved snapshots are implemented. Verify historical_labels/current_labels separation, UNKNOWN legacy names, rename-stale reviews, stable retry, unchanged drafts/answers and explicit rejection of anonymous query slicing. Ten PostgreSQL and eight unit cases pass. |
+| 8. Historical labels       | Approved snapshots are implemented. Verify historical_labels/current_labels separation, UNKNOWN legacy names, rename-stale reviews, stable retry, unchanged drafts/answers and explicit rejection of anonymous query slicing. Ten PostgreSQL and eight unit cases pass.                                                                                              |
 
 A concurrent confirmation may serialize before a later placement/status change. A complete reviewed snapshot followed by that later change can be valid. Require consistent atomic history or a conflict; do not demand 409 for every overlap. Deterministic overlap tests in the consistency suite are stronger evidence than manually clicking Submit twice.
 
@@ -307,7 +327,6 @@ Preview/confirm a scoped evaluation and inspect target_labels, then saved histor
 
 Use historical_labels for historical display. Existing name/relation fields retain current-name compatibility semantics. Inspect all canonical/lecturer/evaluation target readers. Anonymous reports reject query parameters with 400/UNSUPPORTED_ANONYMOUS_SCOPE, including mixed/unknown single-generation/group slices; unfiltered reports retain whole aggregates and expose no student-answer link. Detailed contract/case mapping is in Sections 8.7 and 9.9. Raw evidence is .tmp/labels-*.json. Actual frontend integration remains for the frontend team; repository publication has the owner's explicit permission.
 
-
 ## Approved lecturer release and teaching-history policies
 
 The two approved rules are included in this owner-authorized master delivery. No schema migration is required. Sections 8.9 and 9.11 of the consolidated report describe the contract and POL-01-POL-12 evidence.
@@ -322,7 +341,6 @@ npm.cmd run test:e2e -- --runTestsByPath test/consistency.e2e-spec.ts -t "Closed
 
 The original policy run recorded 12 passed/64 skipped and full totals of 500 unit/410 API tests. With the subsequent primary-department cases present, this filter runs 12 and skips 74 of the 86 consistency cases; the primary-department-stage full totals were 502 unit/420 API tests; current full totals are 514 unit/471 API tests. Policy fixtures are owned synthetic data. No normal/school database changes, reset or publication occurred; the primary migration was initially test-only and later included in the approved normal alignment (report Section 11.8); academic integrity was first test-only (Section 11.10), then applied to local normal after backup/rehearsal and approval (Section 11.12). Actual frontend UI acceptance remains pending.
 
-
 ## One primary department per user
 
 The additive migration 20261014010000_enforce_one_primary_department was initially applied to teacher_evaluation_test, then to local normal during the approved backup/rehearsal/alignment step in report Section 11.8. An audit found no duplicates and the three original membership counts remain. The SQL partial unique index restricts primary rows only; multiple non-primary memberships and zero primary remain valid. It blocks direct SQL duplicates as well as application races. Intended/school database deployment requires its own audit, approved corrections if needed, and restorable backup. The migration refuses duplicates and changes no data automatically.
@@ -334,7 +352,6 @@ npm.cmd run test:e2e -- --runTestsByPath test/consistency.e2e-spec.ts -t "One pr
 ```
 
 Focused result: 10 passed, 76 skipped. Primary-stage regression: 502 unit / 420 API tests; current full regression: 514 unit / 471 API tests, including all 86 consistency cases. Verify actual SQL enforcement and the exact migration on clean/duplicate temporary tables; no public index is dropped and no seed records are rewritten. Full contract/preflight SQL and PD-01-PD-10 evidence are in report Sections 8.10/9.12. Raw evidence is .tmp/primary-departments-*.json and .tmp/primary-departments-schema-diff.sql. UI evaluation remains pending; the owner subsequently authorized publication of this tested delivery to master.
-
 
 ## Academic-integrity safeguards
 
@@ -349,14 +366,14 @@ npm.cmd run test:e2e -- --runTestsByPath test/academic-integrity.e2e-spec.ts
 
 The focused unit result is 12 cases and the focused PostgreSQL result is 51 cases. All are included in the latest 514 unit/471 API totals. Use ADMIN requests with owned fixtures to check these contracts:
 
-| Evaluation area | Expected behavior |
-| --- | --- |
-| Academic years | Zero active and many inactive remain valid. Activating another year demotes the old one atomically. Simultaneous activation preserves at most one active; a conflict returns 409 and can be deliberately retried. |
-| Questionnaire titles | Trimmed case-equivalent titles collide globally, including archived sets. Percent/underscore/backslash are literal. Distinct titles remain usable; a true collision returns 409. Whitespace-only titles return 400. |
-| Offerings | All six assignment-key fields determine identity. A repeated combination returns 409 even with optional NULL fields. Different case-sensitive sections, empty string and NULL remain distinct. |
-| Generation / other levels | Starting and other known year levels must be 1-5. Omitted generation starting level still defaults to 1. Invalid generation create/update returns 400 without changing the row. |
-| Calendar dates | Academic-year/semester ISO input resolves to a UTC calendar day; unqualified datetimes mean UTC. Compare dates after discarding time. Equal/reversed complete dates return 400. Optional null/partial endpoints remain valid. |
-| Evaluation timestamps | start_at/end_at retain time precision; an ordered same-day interval remains valid. Other lifecycle checks still apply. |
-| Direct SQL / migration refusal | Named CHECKs and unique indexes reject bypass attempts. Exact migration tests use temporary dirty tables and verify no winner-selection, row repair or partial index. Do not bypass constraints on school data. |
+| Evaluation area                | Expected behavior                                                                                                                                                                                                             |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Academic years                 | Zero active and many inactive remain valid. Activating another year demotes the old one atomically. Simultaneous activation preserves at most one active; a conflict returns 409 and can be deliberately retried.             |
+| Questionnaire titles           | Trimmed case-equivalent titles collide globally, including archived sets. Percent/underscore/backslash are literal. Distinct titles remain usable; a true collision returns 409. Whitespace-only titles return 400.           |
+| Offerings                      | All six assignment-key fields determine identity. A repeated combination returns 409 even with optional NULL fields. Different case-sensitive sections, empty string and NULL remain distinct.                                |
+| Generation / other levels      | Starting and other known year levels must be 1-5. Omitted generation starting level still defaults to 1. Invalid generation create/update returns 400 without changing the row.                                               |
+| Calendar dates                 | Academic-year/semester ISO input resolves to a UTC calendar day; unqualified datetimes mean UTC. Compare dates after discarding time. Equal/reversed complete dates return 400. Optional null/partial endpoints remain valid. |
+| Evaluation timestamps          | start_at/end_at retain time precision; an ordered same-day interval remains valid. Other lifecycle checks still apply.                                                                                                        |
+| Direct SQL / migration refusal | Named CHECKs and unique indexes reject bypass attempts. Exact migration tests use temporary dirty tables and verify no winner-selection, row repair or partial index. Do not bypass constraints on school data.               |
 
 The suite removes its owned accounts, academic structure, offerings and questionnaire versions. Existing consistency/curriculum/integration tests also pass with the stronger rules. Sections 9.1/11.10 record full regression, Section 11.11 records rehearsal, and Section 11.12 records approved normal alignment and preserved data. Browser UI acceptance and school-sized load remain separate pending steps; publication to master is owner-authorized. The 160 rehearsal cases and both sets of 16 read-only copied/normal GET checks are separate evidence, not extra cases to add to 514/471. Regular synthetic tests still select teacher_evaluation_test only; do not run write-based fixtures against normal.

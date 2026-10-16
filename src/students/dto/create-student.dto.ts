@@ -1,3 +1,4 @@
+import { IsDatabaseId } from '../../common/validators/database-id.validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { gender } from '@prisma/client';
 import {
@@ -75,12 +76,12 @@ export class CreateStudentDto {
   @Matches(/^[1-9]\d*$/, {
     message: 'generation_id must be a positive integer',
   })
+  @IsDatabaseId()
   generation_id!: string;
 
   @ApiProperty({
     example: '1',
-    description:
-      'Academic year ID for the initial academic placement',
+    description: 'Academic year ID for the initial academic placement',
     type: String,
   })
   @IsString()
@@ -88,12 +89,12 @@ export class CreateStudentDto {
   @Matches(/^[1-9]\d*$/, {
     message: 'academic_year_id must be a positive integer',
   })
+  @IsDatabaseId()
   academic_year_id!: string;
 
   @ApiProperty({
     example: 1,
-    description:
-      'Student year level for the initial academic placement',
+    description: 'Student year level for the initial academic placement',
     minimum: 1,
     maximum: 5,
   })
@@ -112,12 +113,12 @@ export class CreateStudentDto {
   @Matches(/^[1-9]\d*$/, {
     message: 'major_id must be a positive integer',
   })
+  @IsDatabaseId()
   major_id!: string;
 
   @ApiPropertyOptional({
     example: 'AMS1-A',
-    description:
-      'Optional class/group for the initial academic placement',
+    description: 'Optional class/group for the initial academic placement',
     maxLength: 50,
   })
   @IsOptional()

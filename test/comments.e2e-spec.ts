@@ -1,3 +1,7 @@
+import {
+  isolatedEvaluationOffering,
+  releaseIsolatedOfferings,
+} from './utils/isolated-evaluation-offering';
 import { baseFixtures } from './utils/base-fixtures';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
@@ -12,7 +16,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 
 describe('Comments (e2e)', () => {
   let app: INestApplication;
- let baseline: Awaited<ReturnType<typeof baseFixtures>>;
+  let baseline: Awaited<ReturnType<typeof baseFixtures>>;
   let prisma: PrismaService;
   let adminToken: string;
   let sokDaraToken: string;
@@ -39,21 +43,41 @@ describe('Comments (e2e)', () => {
     api().get(`/api/lecturer/evaluations/${evalId}/comments`).set(as(token));
 
   async function newVersion(questions: Record<string, unknown>[]) {
-    const id = (await api().post(`/api/surveys/${tempSurveyId}/versions`).set(admin()).send({})).body.id as string;
+    const id = (
+      await api()
+        .post(`/api/surveys/${tempSurveyId}/versions`)
+        .set(admin())
+        .send({})
+    ).body.id as string;
     versionIds.push(id);
     const qIds: string[] = [];
     for (const q of questions) {
-      qIds.push((await api().post(`/api/survey-versions/${id}/questions`).set(admin()).send(q)).body.id);
+      qIds.push(
+        (
+          await api()
+            .post(`/api/survey-versions/${id}/questions`)
+            .set(admin())
+            .send(q)
+        ).body.id,
+      );
     }
     return { id, qIds };
   }
 
+  const isolatedOfferings: bigint[] = [];
   async function newOpenEvaluation(offeringId: string, versionId: string) {
+    offeringId = await isolatedEvaluationOffering(
+      app.get(PrismaService),
+      offeringId,
+      isolatedOfferings,
+    );
     const id = (
-      await api()
-        .post('/api/evaluations')
-        .set(admin())
-        .send({ course_offering_id: offeringId, survey_version_id: versionId, start_at: hourAgo, end_at: nextWeek })
+      await api().post('/api/evaluations').set(admin()).send({
+        course_offering_id: offeringId,
+        survey_version_id: versionId,
+        start_at: hourAgo,
+        end_at: nextWeek,
+      })
     ).body.id as string;
     evalIds.push(id);
     await api().post(`/api/evaluations/${id}/open`).set(admin());
@@ -67,13 +91,18 @@ describe('Comments (e2e)', () => {
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api');
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     await app.init();
- baseline = await baseFixtures(app.get(PrismaService));
+    baseline = await baseFixtures(app.get(PrismaService));
     prisma = app.get(PrismaService);
 
     const login = (email: string) =>
-      api().post('/api/auth/login').send({ identifier: email, password: 'Password123' }).then((res) => res.body.access_token);
+      api()
+        .post('/api/auth/login')
+        .send({ identifier: email, password: 'Password123' })
+        .then((res) => res.body.access_token);
 
     adminToken = await login('admin@itc.edu.kh');
     sokDaraToken = await login('sokdara@itc.edu.kh');
@@ -84,12 +113,25 @@ describe('Comments (e2e)', () => {
       await login('student3@itc.edu.kh'),
     ];
 
-    tempSurveyId = (await api().post('/api/surveys').set(admin()).send({ title: `E2E Comments ${stamp}` })).body.id;
+    tempSurveyId = (
+      await api()
+        .post('/api/surveys')
+        .set(admin())
+        .send({ title: `E2E Comments ${stamp}` })
+    ).body.id;
 
     const main = await newVersion([
       { question_text: 'Overall', question_type: 'RATING' },
-      { question_text: 'What did you like?', question_type: 'TEXT', is_required: false },
-      { question_text: 'What could improve?', question_type: 'TEXT', is_required: false },
+      {
+        question_text: 'What did you like?',
+        question_type: 'TEXT',
+        is_required: false,
+      },
+      {
+        question_text: 'What could improve?',
+        question_type: 'TEXT',
+        is_required: false,
+      },
     ]);
     [ratingQ, likedQ, improveQ] = main.qIds;
 
@@ -97,19 +139,32 @@ describe('Comments (e2e)', () => {
 
     // Submitted in NON-alphabetical order on purpose
     const submissions = [
-      [{ question_id: likedQ, text_value: 'Zebra examples' }, { question_id: improveQ, text_value: 'Slower pace' }],
-      [{ question_id: likedQ, text_value: 'Apple slides' }, { question_id: improveQ, text_value: '' }],
+      [
+        { question_id: likedQ, text_value: 'Zebra examples' },
+        { question_id: improveQ, text_value: 'Slower pace' },
+      ],
+      [
+        { question_id: likedQ, text_value: 'Apple slides' },
+        { question_id: improveQ, text_value: '' },
+      ],
       [{ question_id: improveQ, text_value: 'More labs' }],
     ];
     for (let i = 0; i < 3; i++) {
       await api()
         .post(`/api/student/evaluations/${closedEvalId}/responses`)
         .set(as(studentTokens[i]))
-        .send({ answers: [{ question_id: ratingQ, rating_value: 4 }, ...submissions[i]] });
+        .send({
+          answers: [
+            { question_id: ratingQ, rating_value: 4 },
+            ...submissions[i],
+          ],
+        });
     }
     await api().post(`/api/evaluations/${closedEvalId}/close`).set(admin());
 
-    const other = await newVersion([{ question_text: 'Overall', question_type: 'RATING' }]);
+    const other = await newVersion([
+      { question_text: 'Overall', question_type: 'RATING' },
+    ]);
     openEvalId = await newOpenEvaluation(baseline.offering1, other.id);
   }, 90000);
 
@@ -117,14 +172,26 @@ describe('Comments (e2e)', () => {
     const eIds = evalIds.map((id) => BigInt(id));
     const vIds = versionIds.map((id) => BigInt(id));
 
-    await prisma.answers.deleteMany({ where: { responses: { evaluation_id: { in: eIds } } } });
-    await prisma.responses.deleteMany({ where: { evaluation_id: { in: eIds } } });
-    await prisma.evaluation_participants.deleteMany({ where: { evaluation_id: { in: eIds } } });
+    await prisma.answers.deleteMany({
+      where: { responses: { evaluation_id: { in: eIds } } },
+    });
+    await prisma.responses.deleteMany({
+      where: { evaluation_id: { in: eIds } },
+    });
+    await prisma.evaluation_participants.deleteMany({
+      where: { evaluation_id: { in: eIds } },
+    });
     await prisma.evaluations.deleteMany({ where: { id: { in: eIds } } });
-    await prisma.questions.deleteMany({ where: { survey_version_id: { in: vIds } } });
-    await prisma.survey_versions.deleteMany({ where: { survey_id: BigInt(tempSurveyId) } });
-    if (tempSurveyId) await prisma.surveys.delete({ where: { id: BigInt(tempSurveyId) } });
+    await prisma.questions.deleteMany({
+      where: { survey_version_id: { in: vIds } },
+    });
+    await prisma.survey_versions.deleteMany({
+      where: { survey_id: BigInt(tempSurveyId) },
+    });
+    if (tempSurveyId)
+      await prisma.surveys.delete({ where: { id: BigInt(tempSurveyId) } });
 
+    await releaseIsolatedOfferings(prisma, isolatedOfferings);
     await app.close();
   });
 
@@ -149,8 +216,12 @@ describe('Comments (e2e)', () => {
 
     it('comments are grouped by question and sorted alphabetically, not by submission order', async () => {
       const res = await comments(closedEvalId, sokDaraToken);
-      const liked = res.body.questions.find((q: any) => q.question_id === likedQ);
-      const improve = res.body.questions.find((q: any) => q.question_id === improveQ);
+      const liked = res.body.questions.find(
+        (q: any) => q.question_id === likedQ,
+      );
+      const improve = res.body.questions.find(
+        (q: any) => q.question_id === improveQ,
+      );
 
       expect(liked.comments).toEqual(['Apple slides', 'Zebra examples']);
       expect(improve.comments).toEqual(['More labs', 'Slower pace']);
@@ -158,13 +229,17 @@ describe('Comments (e2e)', () => {
 
     it('an empty comment never appears', async () => {
       const res = await comments(closedEvalId, sokDaraToken);
-      const improve = res.body.questions.find((q: any) => q.question_id === improveQ);
+      const improve = res.body.questions.find(
+        (q: any) => q.question_id === improveQ,
+      );
       expect(improve.comment_count).toBe(2);
     });
 
     it('RATING questions are not included', async () => {
       const res = await comments(closedEvalId, sokDaraToken);
-      expect(res.body.questions.some((q: any) => q.question_id === ratingQ)).toBe(false);
+      expect(
+        res.body.questions.some((q: any) => q.question_id === ratingQ),
+      ).toBe(false);
     });
 
     it('comments are plain text with nothing that identifies a student', async () => {

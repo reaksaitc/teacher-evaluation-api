@@ -62,14 +62,6 @@ async function main() {
       update: {},
       create: { name: 'E2E BASE 2026', start_year: 2026, is_active: false },
     });
-    const generation = await tx.student_generations.upsert({
-      where: { name: 'E2E BASE GENERATION' },
-      update: {},
-      create: {
-        name: 'E2E BASE GENERATION',
-        entry_academic_year_id: academicYear.id,
-      },
-    });
     const major = await tx.majors.upsert({
       where: { code: 'E2E-BASE' },
       update: {},
@@ -77,6 +69,21 @@ async function main() {
         code: 'E2E-BASE',
         name: 'E2E Base Major',
         department_id: department.id,
+      },
+    });
+    const generation = await tx.student_generations.upsert({
+      where: {
+        major_id_generation_number: {
+          major_id: major.id,
+          generation_number: 1,
+        },
+      },
+      update: {},
+      create: {
+        major_id: major.id,
+        generation_number: 1,
+        name: 'Gen 1',
+        entry_academic_year_id: academicYear.id,
       },
     });
     const accounts = new Map();
@@ -100,7 +107,10 @@ async function main() {
       });
       accounts.set(fixture.email, user);
 
-      if (fixture.role !== 'STUDENT') {
+      if (fixture.role === 'ADMIN') {
+        // This synthetic installation administrator has global setup scope.
+        await tx.user_departments.deleteMany({ where: { user_id: user.id } });
+      } else if (fixture.role !== 'STUDENT') {
         await tx.user_departments.upsert({
           where: {
             user_id_department_id: {

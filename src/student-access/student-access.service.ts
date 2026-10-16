@@ -23,6 +23,7 @@ const contextSelect = {
   course_offerings: {
     select: {
       section_code: true,
+      class_type: true,
 
       courses: {
         select: {
@@ -34,6 +35,7 @@ const contextSelect = {
       semesters: {
         select: {
           semester_name: true,
+          semester_number: true,
           academic_year_id: true,
 
           academic_years: {
@@ -41,6 +43,7 @@ const contextSelect = {
               id: true,
               name: true,
               start_year: true,
+              is_active: true,
             },
           },
         },
@@ -111,9 +114,13 @@ function toSummary(e: EvaluationContext) {
     },
 
     section_code: e.course_offerings.section_code,
+    class_type: e.course_offerings.class_type,
 
     semester: {
       name: e.course_offerings.semesters.semester_name,
+      semester_number: e.course_offerings.semesters.semester_number,
+      is_active: e.course_offerings.semesters.academic_years.is_active,
+      start_year: e.course_offerings.semesters.academic_years.start_year,
 
       academic_year_id: e.course_offerings.semesters.academic_year_id,
 

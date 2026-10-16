@@ -41,7 +41,19 @@ function loadTestEnvironment() {
   }
 
   if (config.DB_NAME !== database) {
-    throw new Error('DB_NAME and DATABASE_URL must name the same test database.');
+    throw new Error(
+      'DB_NAME and DATABASE_URL must name the same test database.',
+    );
+  }
+
+  // Isolate compatibility rehearsals from an already-populated shared test database.
+  if (process.env.TEST_DATABASE_SUFFIX !== undefined) {
+    if (!/^[a-z][a-z0-9_]{0,30}$/.test(process.env.TEST_DATABASE_SUFFIX))
+      throw new Error('Invalid TEST_DATABASE_SUFFIX');
+    const isolatedName = `teacher_evaluation_test_${process.env.TEST_DATABASE_SUFFIX}`;
+    url.pathname = `/${isolatedName}`;
+    config.DATABASE_URL = url.toString();
+    config.DB_NAME = isolatedName;
   }
 
   Object.assign(process.env, config);
@@ -49,7 +61,7 @@ function loadTestEnvironment() {
   // Keep the separate settings consistent with the validated URL.
   process.env.DB_HOST = url.hostname;
   process.env.DB_PORT = url.port || '5432';
-  process.env.DB_NAME = database;
+  process.env.DB_NAME = config.DB_NAME;
   process.env.DB_USER = decodeURIComponent(url.username);
   process.env.DB_PASSWORD = decodeURIComponent(url.password);
   process.env.NODE_ENV = 'test';
@@ -67,11 +79,7 @@ if (require.main === module) {
   } else if (mode === 'generate') {
     args = [require.resolve('prisma/build/index.js'), 'generate'];
   } else if (mode === 'migrate') {
-    args = [
-      require.resolve('prisma/build/index.js'),
-      'migrate',
-      'deploy',
-    ];
+    args = [require.resolve('prisma/build/index.js'), 'migrate', 'deploy'];
   } else if (mode === 'test') {
     args = [
       '--experimental-vm-modules',

@@ -1,7 +1,9 @@
+import { assertDepartmentScope } from '../common/utils/department-scope.util';
 import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import { attachTargetLabelViews } from '../common/utils/target-labels.util';
 import {
   BadRequestException,
+  ForbiddenException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -9,6 +11,7 @@ import {
 import { class_type, Prisma } from '@prisma/client';
 
 import { normalizeClassGroups } from '../common/utils/class-group.util';
+import { requireCurriculumApproval } from './curriculum-approval.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCourseOfferingDto } from './dto/create-course-offering.dto';
 import { CourseOfferingGroupScopeDto } from './dto/course-offering-group-scope.dto';
@@ -27,6 +30,11 @@ const groupScopeInclude = {
   },
   student_generations: {
     select: {
+      major_id: true,
+      generation_number: true,
+      majors: {
+        select: { id: true, code: true, name: true, department_id: true },
+      },
       id: true,
       name: true,
     },
@@ -52,6 +60,11 @@ const evaluationGroupTargetInclude = {
 
   student_generations: {
     select: {
+      major_id: true,
+      generation_number: true,
+      majors: {
+        select: { id: true, code: true, name: true, department_id: true },
+      },
       id: true,
       name: true,
     },
@@ -70,6 +83,7 @@ const evaluationGroupTargetInclude = {
 // section_code remains a display label and is not used
 // as proof of student class-group assignment.
 const offeringInclude = {
+  _count: { select: { enrollments: true } },
   courses: true,
   semesters: {
     include: {
@@ -110,12 +124,41 @@ type PrismaWriteClient = PrismaService | Prisma.TransactionClient;
 export class CourseOfferingsService {
   constructor(private prisma: PrismaService) {}
 
-  findAll() {
+  private async readerScope(
+    actorId: bigint,
+  ): Promise<Prisma.course_offeringsWhereInput> {
+    const actor = await this.prisma.users.findUnique({
+      where: { id: actorId },
+      select: { role: true, status: true },
+    });
+    if (!actor || actor.status !== 'ACTIVE')
+      throw new ForbiddenException('Active account required');
+    if (actor.role === 'ADMIN') {
+      const departments = await assertDepartmentScope(this.prisma, actorId);
+      return departments.length
+        ? { courses: { department_id: { in: departments } } }
+        : {};
+    }
+    if (actor.role === 'LECTURER') return { lecturer_id: actorId };
+    return {
+      OR: [
+        { enrollments: { some: { student_id: actorId } } },
+        {
+          evaluations: {
+            some: {
+              evaluation_participants: { some: { student_id: actorId } },
+            },
+          },
+        },
+      ],
+    };
+  }
+  async findAll(actorId?: bigint) {
+    const where = actorId === undefined ? {} : await this.readerScope(actorId);
     return this.prisma.course_offerings.findMany({
+      ...(Object.keys(where).length ? { where } : {}),
       include: offeringInclude,
-      orderBy: {
-        id: 'asc',
-      },
+      orderBy: { id: 'asc' },
     });
   }
 
@@ -254,7 +297,7 @@ export class CourseOfferingsService {
     };
   }
 
-  async findOne(id: bigint) {
+  async findOne(id: bigint, actorId?: bigint) {
     const offering = await this.prisma.course_offerings.findUnique({
       where: {
         id,
@@ -266,20 +309,32 @@ export class CourseOfferingsService {
       throw new NotFoundException('Course offering not found');
     }
 
+    if (
+      actorId !== undefined &&
+      !(await this.prisma.course_offerings.count({
+        where: { AND: [{ id }, await this.readerScope(actorId)] },
+      }))
+    )
+      throw new ForbiddenException(
+        'This offering is outside your authorized scope',
+      );
     return offering;
   }
 
-  async create(dto: CreateCourseOfferingDto) {
+  async create(dto: CreateCourseOfferingDto, actorId?: bigint) {
     return inSerializableTransaction(
       this.prisma,
-      (db) => new CourseOfferingsService(db).createInTransaction(dto),
+      (db) => new CourseOfferingsService(db).createInTransaction(dto, actorId),
       (e: any) => {
         this.handleWriteError(e);
       },
     );
   }
 
-  private async createInTransaction(dto: CreateCourseOfferingDto) {
+  private async createInTransaction(
+    dto: CreateCourseOfferingDto,
+    actorId?: bigint,
+  ) {
     const courseId = BigInt(dto.course_id);
     const lecturerId = BigInt(dto.lecturer_id);
     const semesterId = BigInt(dto.semester_id);
@@ -292,6 +347,19 @@ export class CourseOfferingsService {
     const classType = dto.class_type;
 
     await this.checkReferences(courseId, lecturerId, semesterId);
+    const approval = await requireCurriculumApproval(
+      this.prisma,
+      courseId,
+      semesterId,
+      yearLevel,
+      dto.group_scopes,
+    );
+    if (actorId !== undefined)
+      await assertDepartmentScope(
+        this.prisma,
+        actorId,
+        approval.course.department_id,
+      );
 
     await this.checkNotDuplicate(
       courseId,
@@ -346,18 +414,29 @@ export class CourseOfferingsService {
     }
   }
 
-  async update(id: bigint, dto: UpdateCourseOfferingDto) {
+  async update(id: bigint, dto: UpdateCourseOfferingDto, actorId?: bigint) {
     return inSerializableTransaction(
       this.prisma,
-      (db) => new CourseOfferingsService(db).updateInTransaction(id, dto),
+      (db) =>
+        new CourseOfferingsService(db).updateInTransaction(id, dto, actorId),
       (e: any) => {
         this.handleWriteError(e);
       },
     );
   }
 
-  private async updateInTransaction(id: bigint, dto: UpdateCourseOfferingDto) {
-    const existing = await this.findOne(id);
+  private async updateInTransaction(
+    id: bigint,
+    dto: UpdateCourseOfferingDto,
+    actorId?: bigint,
+  ) {
+    const existing = await this.findOne(id, actorId);
+    if (actorId !== undefined)
+      await assertDepartmentScope(
+        this.prisma,
+        actorId,
+        existing.courses.department_id,
+      );
 
     const courseId =
       dto.course_id !== undefined ? BigInt(dto.course_id) : existing.course_id;
@@ -399,17 +478,73 @@ export class CourseOfferingsService {
         });
     }
 
+    const scopeKeys = (
+      scopes: {
+        academic_year_id: string | bigint;
+        generation_id: string | bigint;
+        major_id: string | bigint;
+        year_level: number;
+        class_groups?: string[];
+        class_group?: string;
+      }[],
+    ) =>
+      [
+        ...new Set(
+          scopes.flatMap((scope) =>
+            normalizeClassGroups(
+              scope.class_groups ?? [scope.class_group!],
+            ).map((group) =>
+              JSON.stringify([
+                String(BigInt(scope.academic_year_id)),
+                String(BigInt(scope.generation_id)),
+                String(BigInt(scope.major_id)),
+                scope.year_level,
+                group,
+              ]),
+            ),
+          ),
+        ),
+      ].sort();
+    if (
+      courseId !== existing.course_id ||
+      semesterId !== existing.semester_id ||
+      yearLevel !== existing.year_level ||
+      (dto.group_scopes !== undefined &&
+        JSON.stringify(scopeKeys(dto.group_scopes)) !==
+          JSON.stringify(scopeKeys(existing.group_scopes)))
+    )
+      await requireCurriculumApproval(
+        this.prisma,
+        courseId,
+        semesterId,
+        yearLevel,
+        dto.group_scopes,
+      );
+    if (actorId !== undefined && courseId !== existing.course_id) {
+      const course = await this.prisma.courses.findUniqueOrThrow({
+        where: { id: courseId },
+      });
+      await assertDepartmentScope(this.prisma, actorId, course.department_id);
+    }
     await this.checkReferences(courseId, lecturerId, semesterId);
 
-    await this.checkNotDuplicate(
-      courseId,
-      lecturerId,
-      semesterId,
-      sectionCode,
-      yearLevel,
-      classType,
-      id,
-    );
+    if (
+      courseId !== existing.course_id ||
+      lecturerId !== existing.lecturer_id ||
+      semesterId !== existing.semester_id ||
+      yearLevel !== existing.year_level ||
+      classType !== existing.class_type
+    ) {
+      await this.checkNotDuplicate(
+        courseId,
+        lecturerId,
+        semesterId,
+        sectionCode,
+        yearLevel,
+        classType,
+        id,
+      );
+    }
 
     /*
      * If group_scopes is omitted, existing scopes are
@@ -548,10 +683,10 @@ export class CourseOfferingsService {
     }
   }
 
-  async remove(id: bigint) {
+  async remove(id: bigint, actorId?: bigint) {
     return inSerializableTransaction(
       this.prisma,
-      (db) => new CourseOfferingsService(db).removeInTransaction(id),
+      (db) => new CourseOfferingsService(db).removeInTransaction(id, actorId),
       (e: any) => {
         if (e.code === 'P2003') {
           throw new ConflictException(
@@ -563,8 +698,14 @@ export class CourseOfferingsService {
     );
   }
 
-  private async removeInTransaction(id: bigint) {
-    await this.findOne(id);
+  private async removeInTransaction(id: bigint, actorId?: bigint) {
+    const existing = await this.findOne(id, actorId);
+    if (actorId !== undefined)
+      await assertDepartmentScope(
+        this.prisma,
+        actorId,
+        existing.courses.department_id,
+      );
 
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -857,7 +998,6 @@ export class CourseOfferingsService {
         course_id: courseId,
         lecturer_id: lecturerId,
         semester_id: semesterId,
-        section_code: sectionCode,
         year_level: yearLevel,
         class_type: classType,
 
@@ -871,7 +1011,11 @@ export class CourseOfferingsService {
     });
 
     if (duplicate) {
-      throw new ConflictException(DUPLICATE_MESSAGE);
+      throw new ConflictException({
+        code: 'ASSIGNMENT_EXISTS',
+        message: DUPLICATE_MESSAGE,
+        existing_assignment_id: duplicate.id.toString(),
+      });
     }
   }
 

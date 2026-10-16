@@ -60,8 +60,11 @@ export class StudentsController {
     status: 201,
     description: 'Student created successfully',
   })
-  async create(@Body() dto: CreateStudentDto) {
-    return this.studentsService.create(dto);
+  async create(
+    @Body() dto: CreateStudentDto,
+    @CurrentUser() actor: { id: bigint },
+  ) {
+    return this.studentsService.create(dto, actor.id);
   }
 
   @Post('import')
@@ -75,8 +78,11 @@ export class StudentsController {
     status: 201,
     description: 'Student import completed',
   })
-  async importStudents(@Body() dto: ImportStudentsDto) {
-    return this.studentImportService.importStudents(dto);
+  async importStudents(
+    @Body() dto: ImportStudentsDto,
+    @CurrentUser() actor: { id: bigint },
+  ) {
+    return this.studentImportService.importStudents(dto, actor.id);
   }
 
   @Get()

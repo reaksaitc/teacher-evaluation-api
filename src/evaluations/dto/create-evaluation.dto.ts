@@ -1,6 +1,8 @@
+import { IsDatabaseId } from '../../common/validators/database-id.validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsDateString,
+  IsBoolean,
   IsNumberString,
   IsOptional,
   ValidateIf,
@@ -9,6 +11,15 @@ import {
 import { EvaluationTargetingDto } from './evaluation-targeting.dto';
 
 export class CreateEvaluationDto extends EvaluationTargetingDto {
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      'Publish within the reviewed creation transaction; requires a valid future deadline',
+  })
+  @IsOptional()
+  @IsBoolean()
+  publish?: boolean;
+
   @ApiProperty({
     example: '1',
     description: 'Course offering that this evaluation belongs to',
@@ -19,6 +30,7 @@ export class CreateEvaluationDto extends EvaluationTargetingDto {
       message: 'course_offering_id must be a positive integer',
     },
   )
+  @IsDatabaseId()
   course_offering_id!: string;
 
   @ApiPropertyOptional({
@@ -37,6 +49,7 @@ export class CreateEvaluationDto extends EvaluationTargetingDto {
         'survey_id must be a positive integer when survey_version_id is not provided',
     },
   )
+  @IsDatabaseId()
   survey_id?: string;
 
   @ApiPropertyOptional({
@@ -54,6 +67,7 @@ export class CreateEvaluationDto extends EvaluationTargetingDto {
       message: 'survey_version_id must be a positive integer',
     },
   )
+  @IsDatabaseId()
   survey_version_id?: string;
 
   @ApiPropertyOptional({

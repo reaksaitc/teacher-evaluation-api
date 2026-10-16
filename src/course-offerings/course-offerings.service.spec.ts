@@ -68,9 +68,27 @@ describe('CourseOfferingsService', () => {
 
     const prismaMock = {
       evaluations: { count: evaluationCount },
-      course_year_rules: { findMany: jest.fn<any>().mockResolvedValue([]) },
+      course_year_rules: {
+        findMany: jest
+          .fn<(...args: any[]) => Promise<any>>()
+          .mockImplementation(async () =>
+            [3, 4].map((year_level) => ({
+              major_id: 60n,
+              year_level,
+              majors: { department_id: 1n },
+              revisions: [
+                { id: 1n, effective_start_year: 2020, enabled: true },
+              ],
+            })),
+          ),
+      },
       courses: {
-        findUnique: courseFindUnique,
+        findUnique: async (...args: any[]) => {
+          const v = await courseFindUnique(...args);
+          return v
+            ? { department_id: 1n, departments: { status: 'ACTIVE' }, ...v }
+            : v;
+        },
       },
 
       users: {
@@ -78,15 +96,30 @@ describe('CourseOfferingsService', () => {
       },
 
       semesters: {
-        findUnique: semesterFindUnique,
+        findUnique: async (...args: any[]) => {
+          const v = await semesterFindUnique(...args);
+          return v
+            ? {
+                academic_year_id: 10n,
+                academic_years: { id: 10n, start_year: 2026 },
+                ...v,
+              }
+            : v;
+        },
       },
 
       academic_years: {
-        findUnique: academicYearFindUnique,
+        findUnique: async (...args: any[]) => {
+          const v = await academicYearFindUnique(...args);
+          return v ? { start_year: 2026, ...v } : v;
+        },
       },
 
       student_generations: {
-        findUnique: generationFindUnique,
+        findUnique: async (...args: any[]) => {
+          const v = await generationFindUnique(...args);
+          return v ? { major_id: 60n, ...v } : v;
+        },
       },
 
       majors: {
@@ -394,6 +427,16 @@ describe('CourseOfferingsService', () => {
 
                     student_generations: {
                       select: {
+                        major_id: true,
+                        generation_number: true,
+                        majors: {
+                          select: {
+                            id: true,
+                            code: true,
+                            name: true,
+                            department_id: true,
+                          },
+                        },
                         id: true,
                         name: true,
                       },
@@ -574,7 +617,7 @@ describe('CourseOfferingsService', () => {
             major_id: 60n,
             year_level: 4,
             class_group: 'A',
-            curriculum_revision_id: null,
+            curriculum_revision_id: 1n,
           },
           {
             course_offering_id: 1n,
@@ -583,7 +626,7 @@ describe('CourseOfferingsService', () => {
             major_id: 60n,
             year_level: 4,
             class_group: 'B',
-            curriculum_revision_id: null,
+            curriculum_revision_id: 1n,
           },
         ],
       });
@@ -613,7 +656,7 @@ describe('CourseOfferingsService', () => {
           ],
         }),
       ).rejects.toThrow(
-        'Group scope academic_year_id must match the course offering semester academic year',
+        'Every audience scope must match the semester academic year and course student year',
       );
 
       expect(groupScopeCreateMany).not.toHaveBeenCalled();
@@ -645,7 +688,7 @@ describe('CourseOfferingsService', () => {
           ],
         }),
       ).rejects.toThrow(
-        'Group scope year_level must match the course offering year_level',
+        'Every audience scope must match the semester academic year and course student year',
       );
 
       expect(groupScopeCreateMany).not.toHaveBeenCalled();
@@ -653,27 +696,16 @@ describe('CourseOfferingsService', () => {
       expect(offeringCreate).not.toHaveBeenCalled();
     });
 
-    it('allows an optional year level with a required class type', async () => {
-      offeringCreate.mockResolvedValue({
-        id: 1n,
-      });
-
-      await service.create({
-        course_id: '10',
-        lecturer_id: '20',
-        semester_id: '30',
-        class_type: class_type.COURSE,
-      });
-
-      expect(offeringCreate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            year_level: null,
-            class_type: class_type.COURSE,
-            section_code: null,
-          }),
+    it('rejects an omitted student year without writing an offering', async () => {
+      await expect(
+        service.create({
+          course_id: '10',
+          lecturer_id: '20',
+          semester_id: '30',
+          class_type: class_type.COURSE,
         }),
-      );
+      ).rejects.toThrow('approved course student year');
+      expect(offeringCreate).not.toHaveBeenCalled();
     });
 
     it('rejects an unknown course', async () => {
@@ -752,6 +784,7 @@ describe('CourseOfferingsService', () => {
           course_id: '10',
           lecturer_id: '20',
           semester_id: '30',
+          year_level: 4,
           section_code: 'A',
           class_type: class_type.COURSE,
         }),
@@ -770,6 +803,7 @@ describe('CourseOfferingsService', () => {
           course_id: '10',
           lecturer_id: '20',
           semester_id: '30',
+          year_level: 4,
           class_type: class_type.COURSE,
         }),
       ).rejects.toBeInstanceOf(ConflictException);
@@ -1040,7 +1074,7 @@ describe('CourseOfferingsService', () => {
             major_id: 60n,
             year_level: 3,
             class_group: 'B',
-            curriculum_revision_id: null,
+            curriculum_revision_id: 1n,
           },
           {
             course_offering_id: 1n,
@@ -1049,32 +1083,20 @@ describe('CourseOfferingsService', () => {
             major_id: 60n,
             year_level: 3,
             class_group: 'C',
-            curriculum_revision_id: null,
+            curriculum_revision_id: 1n,
           },
         ],
       });
     });
 
-    it('excludes the current offering from duplicate checking', async () => {
+    it('preserves the assignment identity when editing only its display label', async () => {
       offeringUpdate.mockResolvedValue(existingOffering);
 
       await service.update(1n, {
         section_code: 'B',
       });
 
-      expect(offeringFindFirst).toHaveBeenCalledWith({
-        where: {
-          course_id: 10n,
-          lecturer_id: 20n,
-          semester_id: 30n,
-          section_code: 'B',
-          year_level: 3,
-          class_type: 'COURSE',
-          id: {
-            not: 1n,
-          },
-        },
-      });
+      expect(offeringFindFirst).not.toHaveBeenCalled();
     });
 
     it('rejects an inactive lecturer during update', async () => {

@@ -16,6 +16,13 @@ import {
 } from '@nestjs/common';
 
 import { evaluation_participant_scope, Prisma } from '@prisma/client';
+import { reviewJson } from '../reviewed-workflows/reviewed-operation.store';
+import { EvaluationTargetingDto } from './dto/evaluation-targeting.dto';
+import { assertDepartmentScope } from '../common/utils/department-scope.util';
+import {
+  activityState,
+  recordEvaluationActivity,
+} from './evaluation-activity.util';
 
 import {
   normalizeClassGroup,
@@ -44,6 +51,7 @@ const evaluationInclude = {
       courses: {
         select: {
           id: true,
+          department_id: true,
 
           course_code: true,
 
@@ -108,6 +116,11 @@ const evaluationInclude = {
 
       student_generations: {
         select: {
+          major_id: true,
+          generation_number: true,
+          majors: {
+            select: { id: true, code: true, name: true, department_id: true },
+          },
           id: true,
 
           name: true,
@@ -139,6 +152,11 @@ const evaluationInclude = {
 
       student_generations: {
         select: {
+          major_id: true,
+          generation_number: true,
+          majors: {
+            select: { id: true, code: true, name: true, department_id: true },
+          },
           id: true,
           name: true,
         },
@@ -184,6 +202,8 @@ type EligibleStudent = {
   full_name: string;
   generation_id: bigint;
   generation_name: string;
+  generation_number: number | null;
+  generation_major_id: bigint | null;
   effective_year_level: number | null;
   year_level_source:
     | 'ACADEMIC_RECORD'
@@ -207,10 +227,12 @@ type EligibilityResult = {
     year_level: number;
     class_groups: string[];
   } | null;
+  group_scopes?: ResolvedEvaluationGroupScope[];
   eligible_students: EligibleStudent[];
   enrolled_count: number;
   ineligible_count: number;
   ineligible_reasons: {
+    audience_not_selected?: number;
     not_active_student: number;
     missing_student_profile: number;
     generation_not_selected: number;
@@ -239,10 +261,17 @@ type ResolvedEvaluationGroupScope = {
 export class EvaluationsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(query: ListEvaluationsQueryDto) {
+  async findAll(query: ListEvaluationsQueryDto, actorId?: bigint) {
+    const scope =
+      actorId === undefined
+        ? []
+        : await assertDepartmentScope(this.prisma, actorId);
     const rows = await this.prisma.evaluations.findMany({
       where: {
         status: query.status,
+        ...(scope.length
+          ? { course_offerings: { courses: { department_id: { in: scope } } } }
+          : {}),
       },
 
       include: evaluationInclude,
@@ -251,10 +280,15 @@ export class EvaluationsService {
         id: 'asc',
       },
     });
-    return rows.map(attachTargetLabelViews);
+    return Promise.all(
+      rows.map(async (row) => ({
+        ...attachTargetLabelViews(row),
+        filter_metadata: await this.audienceMetadata(row),
+      })),
+    );
   }
 
-  async findOne(id: bigint) {
+  async findOne(id: bigint, actorId?: bigint) {
     const evaluation = await this.prisma.evaluations.findUnique({
       where: {
         id,
@@ -267,38 +301,88 @@ export class EvaluationsService {
       throw new NotFoundException('Evaluation not found');
     }
 
-    return attachTargetLabelViews(evaluation);
+    if (actorId !== undefined)
+      await assertDepartmentScope(
+        this.prisma,
+        actorId,
+        evaluation.course_offerings.courses.department_id,
+      );
+    return {
+      ...attachTargetLabelViews(evaluation),
+      filter_metadata: await this.audienceMetadata(evaluation),
+    };
   }
 
-  async previewParticipants(dto: PreviewEvaluationParticipantsDto) {
+  private async audienceMetadata(evaluation: {
+    id: bigint;
+    course_offerings: {
+      courses: { department_id: bigint };
+      semesters: { academic_year_id: bigint; semester_number: number | null };
+    };
+  }) {
+    const participants = await this.prisma.evaluation_participants.findMany({
+      where: { evaluation_id: evaluation.id },
+      select: { placement_snapshot: true },
+    });
+    const contexts = participants.map(
+      (p) =>
+        p.placement_snapshot as {
+          major?: { id?: string };
+          year_level?: number;
+        } | null,
+    );
+    const available =
+      contexts.length > 0 &&
+      contexts.every((c) => c?.major?.id && Number.isInteger(c.year_level));
+    const pairs = new Map<string, { major_id: string; year_level: number }>();
+    for (const c of contexts)
+      if (c?.major?.id && c.year_level)
+        pairs.set(`${c.major.id}:${c.year_level}`, {
+          major_id: c.major.id,
+          year_level: c.year_level,
+        });
+    return {
+      academic_year_id: String(
+        evaluation.course_offerings.semesters.academic_year_id,
+      ),
+      semester_number: evaluation.course_offerings.semesters.semester_number,
+      department_id: String(evaluation.course_offerings.courses.department_id),
+      audience_pairs: [...pairs.values()],
+      audience_status: available ? 'COMPLETE' : 'UNAVAILABLE',
+      unavailable_reason: available
+        ? null
+        : 'LEGACY_PARTICIPANT_PLACEMENT_NOT_CAPTURED',
+    };
+  }
+
+  async previewParticipants(
+    dto: PreviewEvaluationParticipantsDto,
+    actorId?: bigint,
+  ) {
     return inSerializableTransaction(this.prisma, (db) =>
-      new EvaluationsService(db).previewParticipantsInTransaction(dto),
+      new EvaluationsService(db).previewParticipantsInTransaction(dto, actorId),
     );
   }
 
   private async previewParticipantsInTransaction(
     dto: PreviewEvaluationParticipantsDto,
+    actorId?: bigint,
   ) {
     const offeringId = BigInt(dto.course_offering_id);
+    if (actorId !== undefined) {
+      const offering = await this.prisma.course_offerings.findUnique({
+        where: { id: offeringId },
+        include: { courses: true },
+      });
+      if (!offering) throw new NotFoundException('Course offering not found');
+      await assertDepartmentScope(
+        this.prisma,
+        actorId,
+        offering.courses.department_id,
+      );
+    }
 
-    const scope =
-      dto.participant_scope ?? evaluation_participant_scope.ALL_ENROLLED;
-
-    const generationIds = this.parseGenerationIds(
-      scope,
-
-      dto.generation_ids,
-    );
-
-    const result = await this.resolveEligibleStudents(
-      offeringId,
-
-      scope,
-
-      generationIds,
-
-      dto.group_scope,
-    );
+    const result = await this.resolveAudience(offeringId, dto);
 
     return {
       course_offering_id: offeringId.toString(),
@@ -318,6 +402,16 @@ export class EvaluationsService {
               class_groups: result.group_scope.class_groups,
             },
 
+      group_scopes: (result.group_scopes ?? []).map((scope) => ({
+        ...scope,
+        academic_year_id: String(scope.academic_year_id),
+        generation_id: String(scope.generation_id),
+        major_id: String(scope.major_id),
+      })),
+      major_ids: dto.major_ids ?? null,
+      audience_breakdown: await this.audienceBreakdown(
+        result.eligible_students,
+      ),
       enrolled_count: result.enrolled_count,
 
       eligible_count: result.eligible_students.length,
@@ -325,6 +419,8 @@ export class EvaluationsService {
       ineligible_count: result.ineligible_count,
 
       ineligible_reasons: {
+        audience_not_selected:
+          result.ineligible_reasons.audience_not_selected ?? 0,
         not_active_student: result.ineligible_reasons.not_active_student,
         missing_student_profile:
           result.ineligible_reasons.missing_student_profile,
@@ -359,6 +455,8 @@ export class EvaluationsService {
         generation_id: student.generation_id.toString(),
 
         generation_name: student.generation_name,
+        generation_number: student.generation_number,
+        generation_major_id: student.generation_major_id?.toString() ?? null,
 
         effective_year_level: student.effective_year_level,
 
@@ -398,31 +496,18 @@ export class EvaluationsService {
     const duplicate = await this.prisma.evaluations.findFirst({
       where: {
         course_offering_id: BigInt(dto.course_offering_id),
-        survey_version_id: versionId,
       },
       select: { id: true },
     });
     if (duplicate)
-      throw new ConflictException(
-        'This offering already has an evaluation using this version',
-      );
+      throw new ConflictException({
+        code: 'EVALUATION_EXISTS',
+        message: 'Evaluation already exists for this teaching assignment',
+        existing_evaluation_id: String(duplicate.id),
+      });
     return {
       ...preview,
-      target_labels: await loadTargetLabels(
-        this.prisma,
-        this.parseGenerationIds(
-          dto.participant_scope ?? evaluation_participant_scope.ALL_ENROLLED,
-          dto.generation_ids,
-        ),
-        preview.group_scope
-          ? {
-              ...preview.group_scope,
-              academic_year_id: BigInt(preview.group_scope.academic_year_id),
-              generation_id: BigInt(preview.group_scope.generation_id),
-              major_id: BigInt(preview.group_scope.major_id),
-            }
-          : null,
-      ),
+      target_labels: await this.audienceLabels(dto),
       survey_version_id: versionId.toString(),
       start_at: dto.start_at ?? null,
       end_at: dto.end_at ?? null,
@@ -430,22 +515,49 @@ export class EvaluationsService {
   }
 
   async create(dto: CreateEvaluationDto, createdBy: bigint) {
-    return inSerializableTransaction(
-      this.prisma,
-      (db) => new EvaluationsService(db).createInTransaction(dto, createdBy),
-      (e: any) => {
-        if (
-          e instanceof Prisma.PrismaClientKnownRequestError &&
-          e.code === 'P2002'
-        ) {
-          throw new ConflictException(
-            'This course offering already has an evaluation using this survey version',
-          );
-        }
+    try {
+      return await inSerializableTransaction(
+        this.prisma,
+        (db) => new EvaluationsService(db).createInTransaction(dto, createdBy),
+        (e: any) => {
+          if (
+            e instanceof Prisma.PrismaClientKnownRequestError &&
+            e.code === 'P2002'
+          ) {
+            throw new ConflictException(
+              'This course offering already has an evaluation using this survey version',
+            );
+          }
 
-        throw e;
-      },
-    );
+          throw e;
+        },
+      );
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        const existing = await this.prisma.evaluations.findFirst({
+          where: { course_offering_id: BigInt(dto.course_offering_id) },
+          include: {
+            course_offerings: { include: { courses: true, semesters: true } },
+          },
+        });
+        if (existing) {
+          await assertDepartmentScope(
+            this.prisma,
+            createdBy,
+            existing.course_offerings.courses.department_id,
+          );
+          throw new ConflictException({
+            code: 'EVALUATION_EXISTS',
+            message: 'Evaluation already exists for this teaching assignment',
+            existing_evaluation_id: String(existing.id),
+            academic_year_id: String(
+              existing.course_offerings.semesters.academic_year_id,
+            ),
+          });
+        }
+      }
+      throw error;
+    }
   }
 
   private async createInTransaction(
@@ -471,6 +583,15 @@ export class EvaluationsService {
       );
     }
 
+    const context = await this.prisma.course_offerings.findUniqueOrThrow({
+      where: { id: offeringId },
+      include: { courses: true },
+    });
+    await assertDepartmentScope(
+      this.prisma,
+      createdBy,
+      context.courses.department_id,
+    );
     const versionId = await this.resolveSurveyVersion(dto);
 
     const startAt = dto.start_at ? new Date(dto.start_at) : null;
@@ -482,6 +603,17 @@ export class EvaluationsService {
 
       endAt,
     );
+
+    const duplicate = await this.prisma.evaluations.findFirst({
+      where: { course_offering_id: offeringId },
+      select: { id: true },
+    });
+    if (duplicate)
+      throw new ConflictException({
+        code: 'EVALUATION_EXISTS',
+        message: 'Evaluation already exists for this teaching assignment',
+        existing_evaluation_id: String(duplicate.id),
+      });
 
     const scope =
       dto.participant_scope ?? evaluation_participant_scope.ALL_ENROLLED;
@@ -495,6 +627,8 @@ export class EvaluationsService {
     const requiresConfirmedParticipants =
       scope === evaluation_participant_scope.SELECTED_GENERATIONS ||
       dto.group_scope !== undefined ||
+      dto.group_scopes !== undefined ||
+      dto.major_ids !== undefined ||
       dto.confirmed_student_ids !== undefined;
 
     let eligibility: EligibilityResult | null = null;
@@ -506,15 +640,7 @@ export class EvaluationsService {
         );
       }
 
-      eligibility = await this.resolveEligibleStudents(
-        offeringId,
-
-        scope,
-
-        generationIds,
-
-        dto.group_scope,
-      );
+      eligibility = await this.resolveAudience(offeringId, dto);
 
       if (eligibility.eligible_students.length === 0) {
         throw new BadRequestException(
@@ -536,11 +662,9 @@ export class EvaluationsService {
         let transactionEligibility = eligibility;
 
         if (requiresConfirmedParticipants) {
-          transactionEligibility = await this.resolveEligibleStudents(
+          transactionEligibility = await this.resolveAudience(
             offeringId,
-            scope,
-            generationIds,
-            dto.group_scope,
+            dto,
             tx,
           );
 
@@ -558,11 +682,7 @@ export class EvaluationsService {
           }
         }
 
-        const labels = await loadTargetLabels(
-          tx,
-          generationIds,
-          transactionEligibility?.group_scope ?? null,
-        );
+        const labels = await this.audienceLabels(dto);
         const created = await tx.evaluations.create({
           data: {
             course_offering_id: offeringId,
@@ -605,34 +725,49 @@ export class EvaluationsService {
           });
         }
 
-        if (
-          transactionEligibility?.group_scope !== null &&
-          transactionEligibility?.group_scope !== undefined
-        ) {
-          const frozenGroupScope = transactionEligibility.group_scope;
-
+        for (const frozen of transactionEligibility?.group_scopes ?? []) {
+          const captured = await loadTargetLabels(tx, [], frozen);
           await tx.evaluation_group_targets.createMany({
-            data: frozenGroupScope.class_groups.map((classGroup) => ({
+            data: frozen.class_groups.map((classGroup) => ({
               evaluation_id: created.id,
-
-              academic_year_id: frozenGroupScope.academic_year_id,
-
-              generation_id: frozenGroupScope.generation_id,
-
-              major_id: frozenGroupScope.major_id,
-
-              year_level: frozenGroupScope.year_level,
-
+              academic_year_id: frozen.academic_year_id,
+              generation_id: frozen.generation_id,
+              major_id: frozen.major_id,
+              year_level: frozen.year_level,
               class_group: classGroup,
-              historical_labels: labels.groups.find(
+              historical_labels: captured.groups.find(
                 (entry) => entry.class_group === classGroup,
               )!.historical_labels,
               labels_captured_at: now,
-
               created_at: now,
             })),
           });
         }
+        const majors = transactionEligibility
+          ? await tx.majors.findMany({
+              where: {
+                id: {
+                  in: transactionEligibility.eligible_students.flatMap(
+                    (student) =>
+                      student.placement_major_id
+                        ? [student.placement_major_id]
+                        : [],
+                  ),
+                },
+              },
+            })
+          : [];
+        const cohorts = transactionEligibility
+          ? await tx.student_generations.findMany({
+              where: {
+                id: {
+                  in: transactionEligibility.eligible_students.map(
+                    (student) => student.generation_id,
+                  ),
+                },
+              },
+            })
+          : [];
 
         if (transactionEligibility !== null) {
           await tx.evaluation_participants.createMany({
@@ -640,7 +775,19 @@ export class EvaluationsService {
               evaluation_id: created.id,
 
               student_id: student.user_id,
-
+              placement_snapshot: reviewJson({
+                academic_year_id: student.placement_academic_year_id,
+                major:
+                  majors.find(
+                    (major) => major.id === student.placement_major_id,
+                  ) ?? null,
+                year_level: student.effective_year_level,
+                class_group: student.class_group,
+                generation:
+                  cohorts.find(
+                    (cohort) => cohort.id === student.generation_id,
+                  ) ?? null,
+              }),
               survey_version_id: versionId,
 
               has_submitted: false,
@@ -650,6 +797,18 @@ export class EvaluationsService {
           });
         }
 
+        await recordEvaluationActivity(
+          tx as PrismaService,
+          created.id,
+          'CREATED',
+          createdBy,
+          null,
+          {
+            start_at: startAt?.toISOString() ?? null,
+            end_at: endAt?.toISOString() ?? null,
+            status: 'DRAFT',
+          },
+        );
         return created.id;
       });
 
@@ -668,9 +827,9 @@ export class EvaluationsService {
     }
   }
 
-  async updateSchedule(id: bigint, dto: UpdateScheduleDto) {
+  async updateSchedule(id: bigint, dto: UpdateScheduleDto, actorId?: bigint) {
     return inSerializableTransaction(this.prisma, (db) =>
-      new EvaluationsService(db).updateScheduleInTransaction(id, dto),
+      new EvaluationsService(db).updateScheduleInTransaction(id, dto, actorId),
     );
   }
 
@@ -678,13 +837,34 @@ export class EvaluationsService {
     id: bigint,
 
     dto: UpdateScheduleDto,
+    actorId?: bigint,
   ) {
-    const evaluation = await this.findOne(id);
+    const evaluation = await this.findOne(id, actorId);
 
-    if (evaluation.status !== 'DRAFT') {
-      throw new ConflictException(
-        'The schedule can only be changed while the evaluation is a DRAFT',
+    if (dto.start_at === null || dto.end_at === null)
+      throw new BadRequestException(
+        'Schedule dates must be valid ISO strings, not null',
       );
+    const now = new Date();
+    const extending =
+      evaluation.status === 'OPEN' &&
+      evaluation.start_at !== null &&
+      evaluation.end_at !== null &&
+      evaluation.start_at <= now &&
+      now < evaluation.end_at;
+    if (evaluation.status !== 'DRAFT') {
+      if (!extending)
+        throw new ConflictException(
+          'Only DRAFT schedules or active OPEN deadlines can be changed',
+        );
+      if (
+        dto.start_at !== undefined ||
+        !dto.end_at ||
+        new Date(dto.end_at) <= evaluation.end_at!
+      )
+        throw new BadRequestException(
+          'An active extension must supply only a strictly later end_at',
+        );
     }
 
     const startAt =
@@ -699,7 +879,7 @@ export class EvaluationsService {
       endAt,
     );
 
-    return this.prisma.evaluations.update({
+    const updated = await this.prisma.evaluations.update({
       where: {
         id,
       },
@@ -714,11 +894,20 @@ export class EvaluationsService {
 
       include: evaluationInclude,
     });
+    await recordEvaluationActivity(
+      this.prisma,
+      id,
+      extending ? 'DEADLINE_EXTENDED' : 'SCHEDULE_UPDATED',
+      actorId,
+      activityState(evaluation),
+      activityState(updated),
+    );
+    return updated;
   }
 
-  async open(id: bigint) {
+  async open(id: bigint, actorId?: bigint) {
     return inSerializableTransaction(this.prisma, (db) =>
-      new EvaluationsService(db).openInTransaction(id),
+      new EvaluationsService(db).openInTransaction(id, false, false, actorId),
     );
   }
 
@@ -727,15 +916,17 @@ export class EvaluationsService {
   }
 
   /** Called only after the reviewed workflow verifies its stored opening snapshot. */
-  async openReviewedAssigned(id: bigint) {
-    return this.openInTransaction(id, true);
+  async openReviewedAssigned(id: bigint, actorId?: bigint) {
+    return this.openInTransaction(id, true, false, actorId);
   }
 
   private async openInTransaction(
     id: bigint,
     reviewedRetention = false,
     previewOnly = false,
+    actorId?: bigint,
   ) {
+    if (actorId !== undefined) await this.findOne(id, actorId);
     const evaluation = await this.prisma.evaluations.findUnique({
       where: {
         id,
@@ -834,6 +1025,7 @@ export class EvaluationsService {
     }
 
     let legacyParticipantIds: bigint[] = [];
+    const legacySnapshots = new Map<bigint, Prisma.InputJsonValue>();
 
     if (
       evaluation._count.evaluation_participants === 0 &&
@@ -849,6 +1041,39 @@ export class EvaluationsService {
         [],
       );
 
+      const majors = await this.prisma.majors.findMany({
+        where: {
+          id: {
+            in: eligibility.eligible_students.flatMap((student) =>
+              student.placement_major_id ? [student.placement_major_id] : [],
+            ),
+          },
+        },
+      });
+      const cohorts = await this.prisma.student_generations.findMany({
+        where: {
+          id: {
+            in: eligibility.eligible_students.map(
+              (student) => student.generation_id,
+            ),
+          },
+        },
+      });
+      for (const student of eligibility.eligible_students)
+        legacySnapshots.set(
+          student.user_id,
+          reviewJson({
+            academic_year_id: student.placement_academic_year_id,
+            major:
+              majors.find((major) => major.id === student.placement_major_id) ??
+              null,
+            year_level: student.effective_year_level,
+            class_group: student.class_group,
+            generation:
+              cohorts.find((cohort) => cohort.id === student.generation_id) ??
+              null,
+          }),
+        );
       legacyParticipantIds = eligibility.eligible_students.map(
         (student) => student.user_id,
       );
@@ -917,7 +1142,7 @@ export class EvaluationsService {
             evaluation_id: id,
 
             student_id: studentId,
-
+            placement_snapshot: legacySnapshots.get(studentId),
             survey_version_id: evaluation.survey_version_id,
 
             has_submitted: false,
@@ -930,17 +1155,26 @@ export class EvaluationsService {
       }
     });
 
-    return this.findOne(id);
+    const opened = await this.findOne(id);
+    await recordEvaluationActivity(
+      this.prisma,
+      id,
+      'SCHEDULED',
+      actorId,
+      activityState(evaluation),
+      activityState(opened),
+    );
+    return opened;
   }
 
-  async close(id: bigint) {
+  async close(id: bigint, actorId?: bigint) {
     return inSerializableTransaction(this.prisma, (db) =>
-      new EvaluationsService(db).closeInTransaction(id),
+      new EvaluationsService(db).closeInTransaction(id, actorId),
     );
   }
 
-  private async closeInTransaction(id: bigint) {
-    await this.findOne(id);
+  private async closeInTransaction(id: bigint, actorId?: bigint) {
+    const before = await this.findOne(id, actorId);
 
     const changed = await this.prisma.evaluations.updateMany({
       where: {
@@ -960,17 +1194,26 @@ export class EvaluationsService {
       throw new ConflictException('Only an OPEN evaluation can be closed');
     }
 
-    return this.findOne(id);
+    const closed = await this.findOne(id);
+    await recordEvaluationActivity(
+      this.prisma,
+      id,
+      'CLOSED',
+      actorId,
+      activityState(before),
+      activityState(closed),
+    );
+    return closed;
   }
 
-  async remove(id: bigint) {
+  async remove(id: bigint, actorId?: bigint) {
     return inSerializableTransaction(this.prisma, (db) =>
-      new EvaluationsService(db).removeInTransaction(id),
+      new EvaluationsService(db).removeInTransaction(id, actorId),
     );
   }
 
-  private async removeInTransaction(id: bigint) {
-    const evaluation = await this.findOne(id);
+  private async removeInTransaction(id: bigint, actorId?: bigint) {
+    const evaluation = await this.findOne(id, actorId);
 
     if (evaluation.status !== 'DRAFT') {
       throw new ConflictException('Only a DRAFT evaluation can be deleted');
@@ -1088,6 +1331,199 @@ export class EvaluationsService {
     };
   }
 
+  private async audienceLabels(dto: EvaluationTargetingDto) {
+    const generations = this.parseGenerationIds(
+      dto.participant_scope ?? evaluation_participant_scope.ALL_ENROLLED,
+      dto.generation_ids,
+    );
+    const labels = await loadTargetLabels(this.prisma, generations, null);
+    for (const scope of dto.group_scopes ??
+      (dto.group_scope ? [dto.group_scope] : [])) {
+      const captured = await loadTargetLabels(this.prisma, [], {
+        ...scope,
+        academic_year_id: BigInt(scope.academic_year_id),
+        generation_id: BigInt(scope.generation_id),
+        major_id: BigInt(scope.major_id),
+      });
+      labels.groups.push(...captured.groups);
+    }
+    return labels;
+  }
+
+  private async audienceBreakdown(students: EligibleStudent[]) {
+    const majors = await this.prisma.majors.findMany({
+      where: {
+        id: {
+          in: students.flatMap((s) =>
+            s.placement_major_id ? [s.placement_major_id] : [],
+          ),
+        },
+      },
+      select: { id: true, code: true, name: true },
+    });
+    const counts = new Map<
+      string,
+      {
+        major_id: string | null;
+        major_label: string;
+        class_group: string | null;
+        count: number;
+      }
+    >();
+    for (const student of students) {
+      const major = majors.find((m) => m.id === student.placement_major_id);
+      const key = JSON.stringify([
+        student.placement_major_id?.toString() ?? null,
+        student.class_group,
+      ]);
+      const entry = counts.get(key) ?? {
+        major_id: student.placement_major_id?.toString() ?? null,
+        major_label: major ? `${major.code} · ${major.name}` : 'Unavailable',
+        class_group: student.class_group,
+        count: 0,
+      };
+      entry.count++;
+      counts.set(key, entry);
+    }
+    return [...counts.values()];
+  }
+
+  private async resolveAudience(
+    offeringId: bigint,
+    dto: EvaluationTargetingDto,
+    tx?: Prisma.TransactionClient,
+  ): Promise<EligibilityResult> {
+    const db = tx ?? this.prisma;
+    if (dto.group_scope === null)
+      throw new BadRequestException(
+        'group_scope must be an object; omit it for all eligible enrolled groups',
+      );
+    if (dto.group_scope !== undefined && dto.group_scopes !== undefined)
+      throw new BadRequestException(
+        'Supply group_scope or group_scopes, never both',
+      );
+    if (
+      dto.group_scopes !== undefined &&
+      (!Array.isArray(dto.group_scopes) || !dto.group_scopes.length)
+    )
+      throw new BadRequestException('group_scopes must be nonempty');
+    if (
+      dto.major_ids !== undefined &&
+      (!Array.isArray(dto.major_ids) || !dto.major_ids.length)
+    )
+      throw new BadRequestException('major_ids must be nonempty');
+    const scopes =
+      dto.group_scopes ?? (dto.group_scope ? [dto.group_scope] : []);
+    const mode =
+      dto.participant_scope ?? evaluation_participant_scope.ALL_ENROLLED;
+    const generations = this.parseGenerationIds(mode, dto.generation_ids);
+    const offering = await db.course_offerings.findUnique({
+      where: { id: offeringId },
+      include: {
+        courses: true,
+        semesters: { include: { academic_years: true } },
+        group_scopes: true,
+      },
+    });
+    if (!offering) throw new NotFoundException('Course offering not found');
+    const majorIds = dto.major_ids?.map(BigInt);
+    for (const majorId of new Set([
+      ...(majorIds ?? []),
+      ...scopes.map((s) => BigInt(s.major_id)),
+    ])) {
+      const major = await db.majors.findUnique({ where: { id: majorId } });
+      if (!major || major.department_id !== offering.courses.department_id)
+        throw new BadRequestException(
+          'Audience major must belong to the course department',
+        );
+    }
+    for (const scope of scopes) {
+      if (majorIds && !majorIds.includes(BigInt(scope.major_id)))
+        throw new BadRequestException('Group scope conflicts with major_ids');
+      if (
+        mode === 'SELECTED_GENERATIONS' &&
+        !generations.includes(BigInt(scope.generation_id))
+      )
+        throw new BadRequestException(
+          'Group scope conflicts with generation_ids',
+        );
+      const cohort = await db.student_generations.findUnique({
+        where: { id: BigInt(scope.generation_id) },
+      });
+      if (
+        !cohort ||
+        (cohort.major_id != null && cohort.major_id !== BigInt(scope.major_id))
+      )
+        throw new BadRequestException(
+          'Group generation does not belong to its major',
+        );
+    }
+    const normalizedScopes = scopes.map((scope) =>
+      this.resolveEvaluationGroupScope(scope, offering)!,
+    );
+    const base = await this.resolveEligibleStudents(
+      offeringId,
+      mode,
+      generations,
+      undefined,
+      tx,
+      offering,
+    );
+    const selected = new Map<string, EligibleStudent>();
+    const resolved: ResolvedEvaluationGroupScope[] = [];
+    const scopeMap = new Map<string, ResolvedEvaluationGroupScope>();
+    for (const group of normalizedScopes) {
+      const key = JSON.stringify([
+        String(group.academic_year_id),
+        String(group.generation_id),
+        String(group.major_id),
+        group.year_level,
+      ]);
+      const existing = scopeMap.get(key);
+      if (existing)
+        existing.class_groups = [
+          ...new Set([...existing.class_groups, ...group.class_groups]),
+        ];
+      else scopeMap.set(key, group);
+      for (const student of base.eligible_students)
+        if (
+          student.generation_id === group.generation_id &&
+          student.placement_major_id === group.major_id &&
+          student.effective_year_level === group.year_level &&
+          student.class_group !== null &&
+          group.class_groups.includes(student.class_group)
+        )
+          selected.set(String(student.user_id), student);
+    }
+    resolved.push(...scopeMap.values());
+    const students = (
+      scopes.length ? [...selected.values()] : base.eligible_students
+    )
+      .filter(
+        (student) =>
+          !majorIds ||
+          (student.placement_major_id !== null &&
+            majorIds.includes(student.placement_major_id)),
+      )
+      .sort((a, b) =>
+        a.user_id < b.user_id ? -1 : a.user_id > b.user_id ? 1 : 0,
+      );
+    return {
+      ...base,
+      group_scope: resolved.length === 1 ? resolved[0] : null,
+      group_scopes: resolved,
+      eligible_students: students,
+      ineligible_count: base.enrolled_count - students.length,
+      ineligible_reasons: {
+        ...base.ineligible_reasons,
+        class_group_mismatch: scopes.length
+          ? base.eligible_students.length - students.length
+          : 0,
+        audience_not_selected: base.eligible_students.length - students.length,
+      },
+    };
+  }
+
   private async resolveEligibleStudents(
     offeringId: bigint,
 
@@ -1098,46 +1534,55 @@ export class EvaluationsService {
     rawGroupScope?: EvaluationGroupScopeDto,
 
     tx?: Prisma.TransactionClient,
+    preloadedOffering?: Prisma.course_offeringsGetPayload<{
+      include: {
+        courses: true;
+        semesters: { include: { academic_years: true } };
+        group_scopes: true;
+      };
+    }>,
   ): Promise<EligibilityResult> {
     const prisma = tx ?? this.prisma;
 
-    const offering = await prisma.course_offerings.findUnique({
-      where: {
-        id: offeringId,
-      },
-
-      select: {
-        id: true,
-
-        year_level: true,
-
-        group_scopes: {
-          select: {
-            academic_year_id: true,
-            generation_id: true,
-            major_id: true,
-            year_level: true,
-            class_group: true,
-          },
+    const offering =
+      preloadedOffering ??
+      (await prisma.course_offerings.findUnique({
+        where: {
+          id: offeringId,
         },
 
-        semesters: {
-          select: {
-            academic_year_id: true,
+        select: {
+          id: true,
 
-            academic_years: {
-              select: {
-                id: true,
+          year_level: true,
 
-                name: true,
+          group_scopes: {
+            select: {
+              academic_year_id: true,
+              generation_id: true,
+              major_id: true,
+              year_level: true,
+              class_group: true,
+            },
+          },
 
-                start_year: true,
+          semesters: {
+            select: {
+              academic_year_id: true,
+
+              academic_years: {
+                select: {
+                  id: true,
+
+                  name: true,
+
+                  start_year: true,
+                },
               },
             },
           },
         },
-      },
-    });
+      }));
 
     if (!offering) {
       throw new NotFoundException('Course offering not found');
@@ -1184,6 +1629,16 @@ export class EvaluationsService {
 
                 student_generations: {
                   select: {
+                    major_id: true,
+                    generation_number: true,
+                    majors: {
+                      select: {
+                        id: true,
+                        code: true,
+                        name: true,
+                        department_id: true,
+                      },
+                    },
                     id: true,
 
                     name: true,
@@ -1363,6 +1818,9 @@ export class EvaluationsService {
         generation_id: student.generation_id,
 
         generation_name: student.student_generations.name,
+        generation_number:
+          student.student_generations.generation_number ?? null,
+        generation_major_id: student.student_generations.major_id ?? null,
 
         effective_year_level: effectiveYearLevel,
 

@@ -1,3 +1,4 @@
+import { IsDatabaseId } from '../../common/validators/database-id.validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
@@ -22,6 +23,7 @@ export class CourseOfferingGroupScopeDto {
   })
   @ValidateIf((_object, value) => value !== undefined)
   @Matches(/^[1-9]\d*$/)
+  @IsDatabaseId()
   curriculum_revision_id?: string;
 
   @ApiProperty({
@@ -29,6 +31,7 @@ export class CourseOfferingGroupScopeDto {
     description: 'Academic year in which the class-group placement applies',
   })
   @IsNumberString({ no_symbols: true })
+  @IsDatabaseId()
   academic_year_id!: string;
 
   @ApiProperty({
@@ -36,6 +39,7 @@ export class CourseOfferingGroupScopeDto {
     description: 'Student generation to which these groups belong',
   })
   @IsNumberString({ no_symbols: true })
+  @IsDatabaseId()
   generation_id!: string;
 
   @ApiProperty({
@@ -43,6 +47,7 @@ export class CourseOfferingGroupScopeDto {
     description: 'Major to which these groups belong',
   })
   @IsNumberString({ no_symbols: true })
+  @IsDatabaseId()
   major_id!: string;
 
   @ApiProperty({

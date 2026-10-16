@@ -1,7 +1,7 @@
-import {
-  ApiProperty,
-  ApiPropertyOptional,
-} from '@nestjs/swagger';
+import { IsDatabaseId } from '../../common/validators/database-id.validator';
+import { Transform } from 'class-transformer';
+import { generationNumber } from '../../student-generations/generation-identity.util';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { gender } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
@@ -17,7 +17,6 @@ import {
   Max,
   MaxLength,
   Min,
-  MinLength,
   ValidateNested,
 } from 'class-validator';
 
@@ -36,8 +35,7 @@ import {
 export class ImportStudentRowDto {
   @ApiProperty({
     example: 'e20221111',
-    description:
-      'Student ID/code from the imported spreadsheet',
+    description: 'Student ID/code from the imported spreadsheet',
     maxLength: 50,
   })
   @IsString()
@@ -59,8 +57,7 @@ export class ImportStudentRowDto {
   @ApiPropertyOptional({
     enum: gender,
     example: 'MALE',
-    description:
-      'Optional student gender. When omitted, gender remains null.',
+    description: 'Optional student gender. When omitted, gender remains null.',
   })
   @IsOptional()
   @IsEnum(gender)
@@ -68,8 +65,7 @@ export class ImportStudentRowDto {
 
   @ApiProperty({
     example: 'AMS',
-    description:
-      'Existing major code or exact major name',
+    description: 'Existing major code or exact major name',
     maxLength: 150,
   })
   @IsString()
@@ -79,8 +75,7 @@ export class ImportStudentRowDto {
 
   @ApiPropertyOptional({
     example: 'Imported from 2026 student list',
-    description:
-      'Optional value from the spreadsheet Other column',
+    description: 'Optional value from the spreadsheet Other column',
   })
   @IsOptional()
   @IsString()
@@ -89,15 +84,31 @@ export class ImportStudentRowDto {
 
 export class ImportStudentsDto {
   @ApiProperty({
+    type: String,
+    description: 'All rows must resolve to this major',
+  })
+  @IsString()
+  @Matches(/^[1-9]\d*$/)
+  @IsDatabaseId()
+  major_id!: string;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: 2147483647, type: Number })
+  @IsOptional()
+  @Transform(({ value }) => (value == null ? value : generationNumber(value)))
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  generation_number?: number;
+  @ApiPropertyOptional({
     example: 'Gen 43',
-    description:
-      'Generation name applied to every student in this import',
+    description: 'Generation name applied to every student in this import',
     maxLength: 150,
   })
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @MaxLength(150)
-  generation!: string;
+  generation?: string;
 
   @ApiPropertyOptional({
     example: '1',
@@ -108,9 +119,9 @@ export class ImportStudentsDto {
   @IsOptional()
   @IsString()
   @Matches(/^[1-9]\d*$/, {
-    message:
-      'entry_academic_year_id must be a positive integer',
+    message: 'entry_academic_year_id must be a positive integer',
   })
+  @IsDatabaseId()
   entry_academic_year_id?: string;
 
   @ApiPropertyOptional({
@@ -136,17 +147,16 @@ export class ImportStudentsDto {
   @IsString()
   @IsNotEmpty()
   @Matches(/^[1-9]\d*$/, {
-    message:
-      'academic_year_id must be a positive integer',
+    message: 'academic_year_id must be a positive integer',
   })
+  @IsDatabaseId()
   academic_year_id!: string;
 
   @ApiProperty({
     example: 1,
     minimum: 1,
     maximum: 5,
-    description:
-      'Initial year level applied to imported students',
+    description: 'Initial year level applied to imported students',
   })
   @IsInt()
   @Min(1)

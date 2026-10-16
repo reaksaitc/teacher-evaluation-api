@@ -190,16 +190,39 @@ describe('Academic-year curriculum revisions and global titles (PostgreSQL)', ()
     }
     generationId = (
       await db.student_generations.create({
-        data: { name: `Curriculum ${stamp}`, entry_academic_year_id: years[0] },
+        data: {
+          name: `Gen 1`,
+          major_id: majorId,
+          generation_number: 1,
+          entry_academic_year_id: years[0],
+        },
       })
     ).id;
     // The migration does not invent a past revision for existing assignments.
-    const legacy = await request(app.getHttpServer())
-      .post('/api/course-offerings')
-      .set(auth())
-      .send({ ...offering(0), section_code: `LEGACY-${stamp}` });
-    expect(legacy.status).toBe(201);
-    legacyOfferingId = legacy.body.id;
+    const legacy = await db.course_offerings.create({
+      data: {
+        course_id: courseId,
+        lecturer_id: lecturerId,
+        semester_id: semesters[0],
+        year_level: 2,
+        class_type: 'COURSE',
+        section_code: `LEGACY-${stamp}`,
+        created_at: now,
+        updated_at: now,
+      },
+    });
+    legacyOfferingId = String(legacy.id);
+    await db.course_offering_group_scopes.create({
+      data: {
+        course_offering_id: legacy.id,
+        academic_year_id: years[0],
+        generation_id: generationId,
+        major_id: majorId,
+        year_level: 2,
+        class_group: 'A',
+      },
+    });
+
     const created = await request(app.getHttpServer())
       .post('/api/course-year-rules')
       .set(auth())
@@ -657,8 +680,8 @@ describe('Academic-year curriculum revisions and global titles (PostgreSQL)', ()
     ).toBe(true);
   });
 
-  it('does not invent revisions for untracked major assignments', async () => {
-    const result = await request(app.getHttpServer())
+  it('rejects new assignments for an untracked major instead of inventing approval', async () => {
+    await request(app.getHttpServer())
       .post('/api/course-offerings')
       .set(auth())
       .send({
@@ -666,8 +689,16 @@ describe('Academic-year curriculum revisions and global titles (PostgreSQL)', ()
         section_code: `UNTRACKED-${stamp}`,
         group_scopes: [scope(2, 2, otherMajorId)],
       })
-      .expect(201);
-    expect(result.body.group_scopes[0].curriculum_revision_id).toBeNull();
+      .expect(409);
+    expect(
+      await db.course_offerings.count({
+        where: {
+          course_id: courseId,
+          semester_id: semesters[2],
+          section_code: `UNTRACKED-${stamp}`,
+        },
+      }),
+    ).toBe(0);
   });
 
   it('requires a new rule identity when moving a course to another year level', async () => {

@@ -9,11 +9,25 @@ import {
 } from 'class-validator';
 
 export class CreateCourseDto {
-  @ApiProperty({ maxLength: 30, example: 'CS101' })
+  @ApiPropertyOptional({
+    maxLength: 30,
+    example: 'CS101',
+    description: 'Omit to allocate a department-prefixed code atomically',
+  })
+  @IsOptional()
   @IsNotEmpty()
   @IsString()
   @MaxLength(30)
-  course_code!: string;
+  course_code?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Stable 8–128 character retry key. Reuse with unchanged input after a lost response.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  idempotency_key?: string;
 
   @ApiProperty({
     maxLength: 150,

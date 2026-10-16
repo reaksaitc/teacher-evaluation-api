@@ -45,6 +45,7 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
     surveys: bigint[] = [];
   const api = () => request(app.getHttpServer());
   const auth = () => ({ Authorization: `Bearer ${token}` });
+  let previousActive: bigint[] = [];
   const now = new Date();
   const surveyData = (title: string) => ({
     title,
@@ -102,6 +103,13 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
     );
     await app.init();
     db = app.get(PrismaService);
+    previousActive = (
+      await db.academic_years.findMany({ where: { is_active: true } })
+    ).map((y) => y.id);
+    await db.academic_years.updateMany({
+      where: { is_active: true },
+      data: { is_active: false },
+    });
     const admin = await db.users.findUniqueOrThrow({
       where: { email: 'admin@itc.edu.kh' },
     });
@@ -277,7 +285,12 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
       await db.student_generations.deleteMany({
         where: { id: { in: generations } },
       });
-      if (rule) await db.course_year_rules.delete({ where: { id: rule } });
+      if (course) {
+        await db.curriculum_revisions.deleteMany({
+          where: { rule: { course_id: course } },
+        });
+        await db.course_year_rules.deleteMany({ where: { course_id: course } });
+      }
       if (course) await db.courses.delete({ where: { id: course } });
       if (major) await db.majors.delete({ where: { id: major } });
       if (department)
@@ -285,6 +298,15 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
       await db.semesters.deleteMany({ where: { id: { in: semesters } } });
       await db.academic_years.deleteMany({ where: { id: { in: years } } });
     }
+    await db.academic_years.updateMany({
+      where: { is_active: true },
+      data: { is_active: false },
+    });
+    if (previousActive.length)
+      await db.academic_years.update({
+        where: { id: previousActive[0] },
+        data: { is_active: true },
+      });
     if (app) await app.close();
   }, 30000);
 
@@ -480,7 +502,17 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
     it.each(Array.from({ length: 8 }, (_, mask) => mask))(
       'rejects duplicate assignment for nullable-key mask %i',
       async (mask) => {
+        const maskSemester = await db.semesters.create({
+          data: {
+            academic_year_id: year,
+            semester_name: `Mask ${mask}-${stamp}`,
+            created_at: now,
+            updated_at: now,
+          },
+        });
+        semesters.push(maskSemester.id);
         const key = {
+          semester_id: maskSemester.id,
           year_level: mask & 1 ? null : 2,
           class_type: mask & 2 ? null : ('TP' as const),
           section_code: mask & 4 ? null : `M${mask}`,
@@ -494,7 +526,6 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
             where: {
               course_id: course,
               lecturer_id: lecturer,
-              semester_id: semester,
               ...key,
             },
           }),
@@ -508,16 +539,43 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
         ).toBe(key.year_level);
       },
     );
-    it('keeps case-sensitive sections and empty versus unknown sections distinct', async () => {
-      const rows = await Promise.all(
-        ['Distinct', 'distinct', '', null].map((section_code) =>
-          directOffering({ year_level: 5, class_type: 'TD', section_code }),
-        ),
-      );
-      expect(new Set(rows.map((r) => String(r.id))).size).toBe(4);
+    it('treats changed, blank and unknown class labels as the same assignment identity', async () => {
+      await directOffering({
+        year_level: 5,
+        class_type: 'TD',
+        section_code: 'Distinct',
+      });
+      for (const section_code of ['distinct', '', null])
+        await expect(
+          db.course_offerings.create({
+            data: {
+              ...offeringData(),
+              year_level: 5,
+              class_type: 'TD',
+              section_code,
+            },
+          }),
+        ).rejects.toMatchObject({ code: 'P2002' });
     });
     it('API rejects duplicate nullable levels and concurrent creation returns a useful conflict', async () => {
+      await db.course_year_rules.create({
+        data: {
+          course_id: course,
+          major_id: major,
+          year_level: 4,
+          revisions: {
+            create: {
+              revision_no: 1,
+              effective_academic_year_id: year,
+              effective_start_year: 2026,
+              enabled: true,
+            },
+          },
+        },
+      });
+
       const input = {
+        year_level: 4,
         course_id: String(course),
         lecturer_id: String(lecturer),
         semester_id: String(semester),
@@ -573,7 +631,8 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
     );
     it('generation create/update reject level 6, accept level 5 and default to level 1', async () => {
       const input = {
-        name: `Boundary ${stamp}`,
+        major_id: String(major),
+        generation_number: 101,
         entry_academic_year_id: String(year),
         starting_year_level: 6,
       };
@@ -599,7 +658,8 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
         .post('/api/student-generations')
         .set(auth())
         .send({
-          name: `Default ${stamp}`,
+          major_id: String(major),
+          generation_number: 102,
           entry_academic_year_id: String(year),
         });
       expect(defaulted.status).toBe(201);
@@ -607,13 +667,24 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
       expect(defaulted.body.starting_year_level).toBe(1);
     });
     it('service-level database violations map to 400 while history errors retain their meaning', async () => {
+      const unused = await db.student_generations.create({
+        data: {
+          name: 'Gen 103',
+          major_id: major,
+          generation_number: 103,
+          entry_academic_year_id: year,
+        },
+      });
+      generations.push(unused.id);
+      const unboundYear = await newYear();
+
       await expect(
         app
           .get(StudentGenerationsService)
-          .update(generation, { starting_year_level: 6 }),
+          .update(unused.id, { starting_year_level: 6 }),
       ).rejects.toBeInstanceOf(BadRequestException);
       await expect(
-        app.get(AcademicYearsService).update(year, { start_year: 2201 }),
+        app.get(AcademicYearsService).update(unboundYear, { start_year: 2201 }),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(
         (await db.academic_years.findUniqueOrThrow({ where: { id: year } }))
@@ -621,26 +692,30 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
       ).toBe(2026);
     });
     it('numeric starting-year bounds reject invalid direct writes and preserve NULL', async () => {
+      const unboundYear = await newYear();
       const original = await db.academic_years.findUniqueOrThrow({
-        where: { id: year },
+        where: { id: unboundYear },
       });
       for (const invalid of [1899, 2201])
         await expect(
           db.academic_years.update({
-            where: { id: year },
+            where: { id: unboundYear },
             data: { start_year: invalid },
           }),
         ).rejects.toThrow('academic_years_start_year_check');
       await db.academic_years.update({
-        where: { id: year },
+        where: { id: unboundYear },
         data: { start_year: null },
       });
       expect(
-        (await db.academic_years.findUniqueOrThrow({ where: { id: year } }))
-          .start_year,
+        (
+          await db.academic_years.findUniqueOrThrow({
+            where: { id: unboundYear },
+          })
+        ).start_year,
       ).toBeNull();
       await db.academic_years.update({
-        where: { id: year },
+        where: { id: unboundYear },
         data: { start_year: original.start_year },
       });
     });

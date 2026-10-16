@@ -1,6 +1,23 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CoursesService } from './courses.service';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
@@ -38,11 +55,21 @@ export class CoursesController {
   @Get(':id')
   @ApiOperation({ summary: 'Get a course by id' })
   @ApiParam({ name: 'id', type: String, example: '1' })
-  @ApiResponse({ status: 200, description: 'The course', schema: { example: courseExample } })
+  @ApiResponse({
+    status: 200,
+    description: 'The course',
+    schema: { example: courseExample },
+  })
   @ApiResponse({
     status: 404,
     description: 'Course not found',
-    schema: { example: { statusCode: 404, message: 'Course not found', error: 'Not Found' } },
+    schema: {
+      example: {
+        statusCode: 404,
+        message: 'Course not found',
+        error: 'Not Found',
+      },
+    },
   })
   findOne(@Param('id', ParseBigIntPipe) id: bigint) {
     return this.coursesService.findOne(id);
@@ -51,14 +78,24 @@ export class CoursesController {
   @Post()
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Create a course' })
-  @ApiResponse({ status: 201, description: 'Course created', schema: { example: courseExample } })
+  @ApiResponse({
+    status: 201,
+    description: 'Course created',
+    schema: { example: courseExample },
+  })
   @ApiResponse({
     status: 409,
     description: 'course_code already exists',
-    schema: { example: { statusCode: 409, message: 'course_code already exists', error: 'Conflict' } },
+    schema: {
+      example: {
+        statusCode: 409,
+        message: 'course_code already exists',
+        error: 'Conflict',
+      },
+    },
   })
-  create(@Body() dto: CreateCourseDto) {
-    return this.coursesService.create(dto);
+  create(@Body() dto: CreateCourseDto, @CurrentUser() actor: { id: bigint }) {
+    return this.coursesService.create(dto, actor.id);
   }
 
   @Put(':id')
@@ -68,19 +105,36 @@ export class CoursesController {
   @ApiResponse({
     status: 200,
     description: 'Course updated',
-    schema: { example: { ...courseExample, updated_at: '2026-01-16T10:30:00.000Z' } },
+    schema: {
+      example: { ...courseExample, updated_at: '2026-01-16T10:30:00.000Z' },
+    },
   })
   @ApiResponse({
     status: 404,
     description: 'Course not found',
-    schema: { example: { statusCode: 404, message: 'Course not found', error: 'Not Found' } },
+    schema: {
+      example: {
+        statusCode: 404,
+        message: 'Course not found',
+        error: 'Not Found',
+      },
+    },
   })
   @ApiResponse({
     status: 409,
     description: 'course_code already exists',
-    schema: { example: { statusCode: 409, message: 'course_code already exists', error: 'Conflict' } },
+    schema: {
+      example: {
+        statusCode: 409,
+        message: 'course_code already exists',
+        error: 'Conflict',
+      },
+    },
   })
-  update(@Param('id', ParseBigIntPipe) id: bigint, @Body() dto: UpdateCourseDto) {
+  update(
+    @Param('id', ParseBigIntPipe) id: bigint,
+    @Body() dto: UpdateCourseDto,
+  ) {
     return this.coursesService.update(id, dto);
   }
 
@@ -93,7 +147,13 @@ export class CoursesController {
   @ApiResponse({
     status: 404,
     description: 'Course not found',
-    schema: { example: { statusCode: 404, message: 'Course not found', error: 'Not Found' } },
+    schema: {
+      example: {
+        statusCode: 404,
+        message: 'Course not found',
+        error: 'Not Found',
+      },
+    },
   })
   async remove(@Param('id', ParseBigIntPipe) id: bigint) {
     await this.coursesService.remove(id);

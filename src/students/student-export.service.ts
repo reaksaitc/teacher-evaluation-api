@@ -51,6 +51,11 @@ const exportStudentSelect = {
 
   student_generations: {
     select: {
+      major_id: true,
+      generation_number: true,
+      majors: {
+        select: { id: true, code: true, name: true, department_id: true },
+      },
       id: true,
       name: true,
       starting_year_level: true,
@@ -357,6 +362,10 @@ export class StudentExportService {
           id: student.student_generations.id.toString(),
 
           name: student.student_generations.name,
+          major_id: student.student_generations.major_id?.toString() ?? null,
+          generation_number:
+            student.student_generations.generation_number ?? null,
+          major: student.student_generations.majors ?? null,
         },
 
         account_status: student.users.status,

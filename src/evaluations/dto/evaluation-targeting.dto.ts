@@ -1,3 +1,4 @@
+import { IsDatabaseId } from '../../common/validators/database-id.validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { evaluation_participant_scope } from '@prisma/client';
 import { Type } from 'class-transformer';
@@ -49,6 +50,7 @@ export class EvaluationTargetingDto extends OptionalReviewDto {
     each: true,
     message: 'Each generation_id must be a positive integer',
   })
+  @IsDatabaseId({ each: true })
   generation_ids?: string[];
 
   @ApiPropertyOptional({
@@ -69,6 +71,32 @@ export class EvaluationTargetingDto extends OptionalReviewDto {
   group_scope?: EvaluationGroupScopeDto;
 
   @ApiPropertyOptional({
+    type: [EvaluationGroupScopeDto],
+    description:
+      'Union of explicit group contexts, intersected with offering enrollment and other audience restrictions. Do not combine with group_scope.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @ValidateNested({ each: true })
+  @Type(() => EvaluationGroupScopeDto)
+  group_scopes?: EvaluationGroupScopeDto[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Independent major restriction. Omit for all eligible enrolled majors; an empty array is invalid.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @IsString({ each: true })
+  @Matches(/^[1-9]\d*$/, { each: true })
+  @IsDatabaseId({ each: true })
+  major_ids?: string[];
+
+  @ApiPropertyOptional({
     type: [String],
     example: ['21', '24', '30'],
     description:
@@ -84,5 +112,6 @@ export class EvaluationTargetingDto extends OptionalReviewDto {
     each: true,
     message: 'Each confirmed_student_id must be a positive integer',
   })
+  @IsDatabaseId({ each: true })
   confirmed_student_ids?: string[];
 }

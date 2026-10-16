@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Delete,
   Get,
@@ -62,8 +63,9 @@ export class EvaluationsController {
   findAll(
     @Query()
     query: ListEvaluationsQueryDto,
+    @CurrentUser() actor: { id: bigint },
   ) {
-    return this.evaluationsService.findAll(query);
+    return this.evaluationsService.findAll(query, actor.id);
   }
 
   @Post('participants/preview')
@@ -88,8 +90,9 @@ export class EvaluationsController {
   previewParticipants(
     @Body()
     dto: PreviewEvaluationParticipantsDto,
+    @CurrentUser() actor: { id: bigint },
   ) {
-    return this.evaluationsService.previewParticipants(dto);
+    return this.evaluationsService.previewParticipants(dto, actor.id);
   }
 
   @Get(':id')
@@ -120,8 +123,9 @@ export class EvaluationsController {
   findOne(
     @Param('id', ParseBigIntPipe)
     id: bigint,
+    @CurrentUser() actor: { id: bigint },
   ) {
-    return this.evaluationsService.findOne(id);
+    return this.evaluationsService.findOne(id, actor.id);
   }
 
   @Post()
@@ -153,6 +157,12 @@ export class EvaluationsController {
       id: bigint;
     },
   ) {
+    if (dto.publish && !dto.review_id)
+      throw new BadRequestException({
+        code: 'REVIEW_REQUIRED',
+        message:
+          'Atomic publication requires a full creation preview and review_id',
+      });
     if (dto.review_id && this.reviewedWorkflows)
       return this.reviewedWorkflows.confirmCreate(dto, currentUser.id);
     requireReviewAtCutover();
@@ -161,7 +171,8 @@ export class EvaluationsController {
 
   @Put(':id/schedule')
   @ApiOperation({
-    summary: 'Set the start/end time of a DRAFT evaluation',
+    summary:
+      'Edit a DRAFT schedule or extend only the deadline of an active OPEN evaluation',
   })
   @ApiParam({
     name: 'id',
@@ -186,8 +197,9 @@ export class EvaluationsController {
 
     @Body()
     dto: UpdateScheduleDto,
+    @CurrentUser() actor: { id: bigint },
   ) {
-    return this.evaluationsService.updateSchedule(id, dto);
+    return this.evaluationsService.updateSchedule(id, dto, actor.id);
   }
 
   @Post(':id/open')
@@ -223,8 +235,9 @@ export class EvaluationsController {
   open(
     @Param('id', ParseBigIntPipe)
     id: bigint,
+    @CurrentUser() actor: { id: bigint },
   ) {
-    return this.evaluationsService.open(id);
+    return this.evaluationsService.open(id, actor.id);
   }
 
   @Post(':id/close')
@@ -252,8 +265,9 @@ export class EvaluationsController {
   close(
     @Param('id', ParseBigIntPipe)
     id: bigint,
+    @CurrentUser() actor: { id: bigint },
   ) {
-    return this.evaluationsService.close(id);
+    return this.evaluationsService.close(id, actor.id);
   }
 
   @Delete(':id')
@@ -283,7 +297,8 @@ export class EvaluationsController {
   async remove(
     @Param('id', ParseBigIntPipe)
     id: bigint,
+    @CurrentUser() actor: { id: bigint },
   ) {
-    await this.evaluationsService.remove(id);
+    await this.evaluationsService.remove(id, actor.id);
   }
 }

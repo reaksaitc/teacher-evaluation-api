@@ -1,3 +1,4 @@
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import {
   Body,
   Controller,
@@ -86,8 +87,11 @@ export class AcademicYearsController {
     description:
       'Academic year already exists or activation conflicts with another change',
   })
-  create(@Body() dto: CreateAcademicYearDto) {
-    return this.academicYearsService.create(dto);
+  create(
+    @Body() dto: CreateAcademicYearDto,
+    @CurrentUser() actor: { id: bigint },
+  ) {
+    return this.academicYearsService.create(dto, actor.id);
   }
 
   @Put(':id')

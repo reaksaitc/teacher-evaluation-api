@@ -10,6 +10,7 @@ import * as bcrypt from 'bcrypt';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { StudentsService } from '../students/students.service';
+import { backendCapabilities } from './backend-capabilities';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 
@@ -59,26 +60,14 @@ export class AuthService {
             email: identifier.toLowerCase(),
           },
         })
-      : await this.findUserByStudentCode(
-          identifier,
-        );
+      : await this.findUserByStudentCode(identifier);
 
-    if (
-      !user ||
-      !(await bcrypt.compare(
-        dto.password,
-        user.password_hash,
-      ))
-    ) {
-      throw new UnauthorizedException(
-        'Invalid identifier or password',
-      );
+    if (!user || !(await bcrypt.compare(dto.password, user.password_hash))) {
+      throw new UnauthorizedException('Invalid identifier or password');
     }
 
     if (user.status !== 'ACTIVE') {
-      throw new ForbiddenException(
-        'Account is not active',
-      );
+      throw new ForbiddenException('Account is not active');
     }
 
     const payload = {
@@ -89,10 +78,10 @@ export class AuthService {
     };
 
     return {
-      access_token:
-        await this.jwt.signAsync(payload),
+      access_token: await this.jwt.signAsync(payload),
 
       user: {
+        capabilities: backendCapabilities,
         id: user.id.toString(),
         email: user.email,
         full_name: user.full_name,
@@ -103,54 +92,49 @@ export class AuthService {
   }
 
   async getMe(userId: bigint) {
-    const user =
-      await this.prisma.users.findUnique({
-        where: {
-          id: userId,
-        },
+    const user = await this.prisma.users.findUnique({
+      where: {
+        id: userId,
+      },
 
-        select: {
-          id: true,
-          email: true,
-          full_name: true,
-          gender: true,
-          role: true,
-          status: true,
+      select: {
+        id: true,
+        email: true,
+        full_name: true,
+        gender: true,
+        role: true,
+        status: true,
 
-          user_departments: {
-            select: {
-              is_primary: true,
+        user_departments: {
+          select: {
+            is_primary: true,
 
-              departments: {
-                select: {
-                  id: true,
-                  code: true,
-                  name: true,
-                },
+            departments: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
               },
             },
-
-            orderBy: [
-              {
-                is_primary: 'desc',
-              },
-              {
-                department_id: 'asc',
-              },
-            ],
           },
+
+          orderBy: [
+            {
+              is_primary: 'desc',
+            },
+            {
+              department_id: 'asc',
+            },
+          ],
         },
-      });
+      },
+    });
 
     if (!user) {
-      throw new NotFoundException(
-        'User not found',
-      );
+      throw new NotFoundException('User not found');
     }
 
-    const capabilities = {
-      change_password: true,
-    };
+    const capabilities = backendCapabilities;
 
     /*
      * Staff profile.
@@ -167,24 +151,17 @@ export class AuthService {
         email: user.email,
         gender: user.gender,
 
-        user_departments:
-          user.user_departments.map(
-            (assignment) => ({
-              is_primary:
-                assignment.is_primary,
+        user_departments: user.user_departments.map((assignment) => ({
+          is_primary: assignment.is_primary,
 
-              department: {
-                id:
-                  assignment.departments.id,
+          department: {
+            id: assignment.departments.id,
 
-                code:
-                  assignment.departments.code,
+            code: assignment.departments.code,
 
-                name:
-                  assignment.departments.name,
-              },
-            }),
-          ),
+            name: assignment.departments.name,
+          },
+        })),
 
         capabilities,
       };
@@ -193,16 +170,15 @@ export class AuthService {
     /*
      * Student profile.
      */
-    const student =
-      await this.prisma.students.findUnique({
-        where: {
-          user_id: userId,
-        },
+    const student = await this.prisma.students.findUnique({
+      where: {
+        user_id: userId,
+      },
 
-        select: {
-          id: true,
-        },
-      });
+      select: {
+        id: true,
+      },
+    });
 
     /*
      * A STUDENT-role user may temporarily have no linked
@@ -238,12 +214,34 @@ export class AuthService {
      * id is only a deterministic secondary ordering field.
      * It is NOT used to calculate a student's year level.
      */
-    let profileAcademicYear =
-      await this.prisma.academic_years.findFirst({
-        where: {
-          is_active: true,
-        },
+    let profileAcademicYear = await this.prisma.academic_years.findFirst({
+      where: {
+        is_active: true,
+      },
 
+      orderBy: [
+        {
+          start_year: 'desc',
+        },
+        {
+          id: 'desc',
+        },
+      ],
+
+      select: {
+        id: true,
+        name: true,
+        start_year: true,
+        is_active: true,
+      },
+    });
+
+    /*
+     * No active academic year:
+     * fall back to the newest available academic year.
+     */
+    if (!profileAcademicYear) {
+      profileAcademicYear = await this.prisma.academic_years.findFirst({
         orderBy: [
           {
             start_year: 'desc',
@@ -260,30 +258,6 @@ export class AuthService {
           is_active: true,
         },
       });
-
-    /*
-     * No active academic year:
-     * fall back to the newest available academic year.
-     */
-    if (!profileAcademicYear) {
-      profileAcademicYear =
-        await this.prisma.academic_years.findFirst({
-          orderBy: [
-            {
-              start_year: 'desc',
-            },
-            {
-              id: 'desc',
-            },
-          ],
-
-          select: {
-            id: true,
-            name: true,
-            start_year: true,
-            is_active: true,
-          },
-        });
     }
 
     /*
@@ -293,10 +267,7 @@ export class AuthService {
      * generation, but effective placement is unavailable.
      */
     if (!profileAcademicYear) {
-      const studentProfile =
-        await this.studentsService.findOne(
-          student.id,
-        );
+      const studentProfile = await this.studentsService.findOne(student.id);
 
       return {
         id: user.id,
@@ -307,17 +278,12 @@ export class AuthService {
         gender: user.gender,
 
         student: {
-          student_code:
-            studentProfile.student_code,
+          student_code: studentProfile.student_code,
 
           generation: {
-            id:
-              studentProfile
-                .student_generations.id,
+            id: studentProfile.student_generations.id,
 
-            name:
-              studentProfile
-                .student_generations.name,
+            name: studentProfile.student_generations.name,
           },
 
           effective_placement: {
@@ -340,11 +306,10 @@ export class AuthService {
      * administration APIs and avoids implementing a second
      * version of the year-level calculation here.
      */
-    const studentProfile =
-      await this.studentsService.findOne(
-        student.id,
-        profileAcademicYear.id.toString(),
-      );
+    const studentProfile = await this.studentsService.findOne(
+      student.id,
+      profileAcademicYear.id.toString(),
+    );
 
     /*
      * StudentsService.findOne() normally returns
@@ -363,17 +328,12 @@ export class AuthService {
         gender: user.gender,
 
         student: {
-          student_code:
-            studentProfile.student_code,
+          student_code: studentProfile.student_code,
 
           generation: {
-            id:
-              studentProfile
-                .student_generations.id,
+            id: studentProfile.student_generations.id,
 
-            name:
-              studentProfile
-                .student_generations.name,
+            name: studentProfile.student_generations.name,
           },
 
           effective_placement: {
@@ -407,8 +367,7 @@ export class AuthService {
      * behavior or placement calculation.
      */
     const academicContext =
-      studentProfile.academic_context as
-        StudentAcademicContext;
+      studentProfile.academic_context as StudentAcademicContext;
 
     /*
      * Major comes only from the explicit academic placement
@@ -417,9 +376,7 @@ export class AuthService {
      * Generation calculation can calculate year level but
      * cannot safely infer a student's major.
      */
-    const major =
-      academicContext.academic_record?.majors ??
-      null;
+    const major = academicContext.academic_record?.majors ?? null;
 
     return {
       id: user.id,
@@ -430,17 +387,17 @@ export class AuthService {
       gender: user.gender,
 
       student: {
-        student_code:
-          studentProfile.student_code,
+        academic_context: academicContext,
+        student_code: studentProfile.student_code,
 
         generation: {
-          id:
-            studentProfile
-              .student_generations.id,
+          major_id: studentProfile.student_generations.major_id ?? null,
+          generation_number:
+            studentProfile.student_generations.generation_number ?? null,
+          major: studentProfile.student_generations.majors ?? null,
+          id: studentProfile.student_generations.id,
 
-          name:
-            studentProfile
-              .student_generations.name,
+          name: studentProfile.student_generations.name,
         },
 
         effective_placement: {
@@ -453,18 +410,12 @@ export class AuthService {
                   name: major.name,
                 },
 
-          year_level:
-            academicContext
-              .effective_year_level,
+          year_level: academicContext.effective_year_level,
 
           academic_year: {
-            id:
-              academicContext
-                .academic_year.id,
+            id: academicContext.academic_year.id,
 
-            name:
-              academicContext
-                .academic_year.name,
+            name: academicContext.academic_year.name,
           },
         },
       },
@@ -482,10 +433,7 @@ export class AuthService {
     };
   }
 
-  async changePassword(
-    userId: bigint,
-    dto: ChangePasswordDto,
-  ) {
+  async changePassword(userId: bigint, dto: ChangePasswordDto) {
     /*
      * bcrypt only safely uses the first 72 UTF-8 bytes.
      *
@@ -494,61 +442,46 @@ export class AuthService {
      * limit while remaining within 72 characters.
      */
     if (
-      Buffer.byteLength(
-        dto.current_password,
-        'utf8',
-      ) > 72 ||
-      Buffer.byteLength(
-        dto.new_password,
-        'utf8',
-      ) > 72
+      Buffer.byteLength(dto.current_password, 'utf8') > 72 ||
+      Buffer.byteLength(dto.new_password, 'utf8') > 72
     ) {
-      throw new BadRequestException(
-        'Password must not exceed 72 UTF-8 bytes',
-      );
+      throw new BadRequestException('Password must not exceed 72 UTF-8 bytes');
     }
 
-    const user =
-      await this.prisma.users.findUnique({
-        where: {
-          id: userId,
-        },
+    const user = await this.prisma.users.findUnique({
+      where: {
+        id: userId,
+      },
 
-        select: {
-          id: true,
-          password_hash: true,
-          status: true,
-          auth_version: true,
-        },
-      });
+      select: {
+        id: true,
+        password_hash: true,
+        status: true,
+        auth_version: true,
+      },
+    });
 
     if (!user) {
       throw new UnauthorizedException();
     }
 
     if (user.status !== 'ACTIVE') {
-      throw new ForbiddenException(
-        'Account is not active',
-      );
+      throw new ForbiddenException('Account is not active');
     }
 
-    const currentPasswordMatches =
-      await bcrypt.compare(
-        dto.current_password,
-        user.password_hash,
-      );
+    const currentPasswordMatches = await bcrypt.compare(
+      dto.current_password,
+      user.password_hash,
+    );
 
     if (!currentPasswordMatches) {
-      throw new BadRequestException(
-        'Current password is incorrect',
-      );
+      throw new BadRequestException('Current password is incorrect');
     }
 
-    const newPasswordMatchesCurrent =
-      await bcrypt.compare(
-        dto.new_password,
-        user.password_hash,
-      );
+    const newPasswordMatchesCurrent = await bcrypt.compare(
+      dto.new_password,
+      user.password_hash,
+    );
 
     if (newPasswordMatchesCurrent) {
       throw new BadRequestException(
@@ -556,11 +489,7 @@ export class AuthService {
       );
     }
 
-    const newPasswordHash =
-      await bcrypt.hash(
-        dto.new_password,
-        10,
-      );
+    const newPasswordHash = await bcrypt.hash(dto.new_password, 10);
 
     /*
      * Atomic compare-and-swap.
@@ -571,26 +500,22 @@ export class AuthService {
      * Incrementing auth_version revokes all previously
      * issued JWTs for this account.
      */
-    const updateResult =
-      await this.prisma.users.updateMany({
-        where: {
-          id: user.id,
-          status: 'ACTIVE',
-          password_hash:
-            user.password_hash,
-          auth_version:
-            user.auth_version,
-        },
+    const updateResult = await this.prisma.users.updateMany({
+      where: {
+        id: user.id,
+        status: 'ACTIVE',
+        password_hash: user.password_hash,
+        auth_version: user.auth_version,
+      },
 
-        data: {
-          password_hash:
-            newPasswordHash,
+      data: {
+        password_hash: newPasswordHash,
 
-          auth_version: {
-            increment: 1,
-          },
+        auth_version: {
+          increment: 1,
         },
-      });
+      },
+    });
 
     if (updateResult.count !== 1) {
       throw new UnauthorizedException(
@@ -599,25 +524,20 @@ export class AuthService {
     }
 
     return {
-      message:
-        'Password changed successfully. Please sign in again.',
+      message: 'Password changed successfully. Please sign in again.',
     };
   }
 
-  private async findUserByStudentCode(
-    studentCode: string,
-  ) {
-    const student =
-      await this.prisma.students.findUnique({
-        where: {
-          student_code:
-            studentCode.toLowerCase(),
-        },
+  private async findUserByStudentCode(studentCode: string) {
+    const student = await this.prisma.students.findUnique({
+      where: {
+        student_code: studentCode.toLowerCase(),
+      },
 
-        select: {
-          users: true,
-        },
-      });
+      select: {
+        users: true,
+      },
+    });
 
     return student?.users ?? null;
   }

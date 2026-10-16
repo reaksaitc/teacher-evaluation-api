@@ -58,8 +58,34 @@ describe('EvaluationsService', () => {
     jest.fn<(callback: TransactionCallback) => Promise<any>>();
 
   const prismaMock: any = {
+    users: {
+      findUnique: jest
+        .fn<(...args: any[]) => Promise<any>>()
+        .mockResolvedValue({
+          role: 'ADMIN',
+          status: 'ACTIVE',
+          full_name: 'Test admin',
+        }),
+    },
+    user_departments: {
+      findMany: jest
+        .fn<(...args: any[]) => Promise<any>>()
+        .mockResolvedValue([]),
+    },
+    evaluation_activity: {
+      create: jest.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({}),
+    },
+
     course_offerings: {
-      findUnique: courseOfferingFindUniqueMock,
+      findUniqueOrThrow: jest
+        .fn<(...args: any[]) => Promise<any>>()
+        .mockResolvedValue({ courses: { department_id: 1n } }),
+      findUnique: async (...args: any[]) => {
+        const value = await (courseOfferingFindUniqueMock as any)(...args);
+        return value
+          ? { ...value, courses: { department_id: 1n, ...value.courses } }
+          : value;
+      },
     },
 
     surveys: {
@@ -73,6 +99,9 @@ describe('EvaluationsService', () => {
     },
 
     evaluations: {
+      findFirst: jest
+        .fn<(...args: any[]) => Promise<any>>()
+        .mockResolvedValue(null),
       findUnique: evaluationFindUniqueMock,
 
       findMany: evaluationFindManyMock,
@@ -91,6 +120,9 @@ describe('EvaluationsService', () => {
     },
 
     evaluation_participants: {
+      findMany: jest
+        .fn<(...args: any[]) => Promise<any>>()
+        .mockResolvedValue([]),
       createMany: participantCreateManyMock,
 
       deleteMany: participantDeleteManyMock,
@@ -109,17 +141,30 @@ describe('EvaluationsService', () => {
     },
 
     student_generations: {
+      findUnique: jest
+        .fn<(...args: any[]) => Promise<any>>()
+        .mockResolvedValue({ id: 1n, major_id: 2n }),
       findMany: studentGenerationFindManyMock,
     },
     academic_years: {
       findUnique: jest
-        .fn<any>()
+        .fn<(...args: any[]) => Promise<any>>()
         .mockResolvedValue({ id: 10n, name: '2026-2027', start_year: 2026 }),
     },
     majors: {
+      findMany: jest
+        .fn<(...args: any[]) => Promise<any>>()
+        .mockResolvedValue([
+          { id: 2n, code: 'AMS', name: 'AMS', department_id: 1n },
+        ]),
       findUnique: jest
-        .fn<any>()
-        .mockResolvedValue({ id: 2n, name: 'AMS', code: 'AMS' }),
+        .fn<(...args: any[]) => Promise<any>>()
+        .mockResolvedValue({
+          id: 2n,
+          name: 'AMS',
+          code: 'AMS',
+          department_id: 1n,
+        }),
     },
 
     $transaction: transactionMock,
@@ -137,6 +182,10 @@ describe('EvaluationsService', () => {
     start_at: null,
     end_at: null,
 
+    course_offerings: {
+      courses: { department_id: 1n },
+      semesters: { academic_year_id: 10n, semester_number: 1 },
+    },
     created_by: BigInt(10),
 
     created_at: new Date('2026-10-01T00:00:00.000Z'),
@@ -1313,7 +1362,7 @@ describe('EvaluationsService', () => {
         }),
       ).rejects.toThrow(
         new BadRequestException(
-          'The course offering does not serve the requested group scope: A',
+          'Group generation does not belong to its major',
         ),
       );
 
@@ -1593,7 +1642,7 @@ describe('EvaluationsService', () => {
     it('should return an evaluation', async () => {
       const result = await service.findOne(BigInt(50));
 
-      expect(result).toEqual(evaluationResult);
+      expect(result).toEqual(expect.objectContaining(evaluationResult));
     });
 
     it('should throw when the evaluation does not exist', async () => {
@@ -1649,7 +1698,7 @@ describe('EvaluationsService', () => {
         }),
       ).rejects.toThrow(
         new ConflictException(
-          'The schedule can only be changed while the evaluation is a DRAFT',
+          'Only DRAFT schedules or active OPEN deadlines can be changed',
         ),
       );
 

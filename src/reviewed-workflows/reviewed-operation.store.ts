@@ -9,8 +9,11 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
+import { assertDepartmentScope } from '../common/utils/department-scope.util';
 
 export type ReviewedOperationKind =
+  | 'CREATE_ASSIGNMENTS'
+  | 'BULK_EVALUATIONS'
   | 'ENROLL_GROUP'
   | 'CREATE_EVALUATION'
   | 'REASSIGN_ENROLLMENT'
@@ -40,12 +43,15 @@ export function reviewFingerprint(value: unknown): string {
     .digest('hex');
 }
 
-type ReviewState = {
-  input: unknown;
-  snapshot: unknown;
-  output: Record<string, unknown>;
-};
-type ResolveReview = (db: PrismaService) => Promise<ReviewState>;
+type ReviewState<T extends Record<string, unknown> = Record<string, unknown>> =
+  {
+    input: unknown;
+    snapshot: unknown;
+    output: T;
+  };
+type ResolveReview<
+  T extends Record<string, unknown> = Record<string, unknown>,
+> = (db: PrismaService) => Promise<ReviewState<T>>;
 
 export function requireReviewAtCutover(): void {
   if (process.env.REQUIRE_REVIEWED_CONFIRMATION === 'true') {
@@ -71,22 +77,45 @@ export class ReviewedOperationStore {
     }
   }
 
-  async preview(
+  private async authorizationScope(
+    db: PrismaService,
+    kind: ReviewedOperationKind,
+    actorId: bigint,
+  ) {
+    if (
+      !['CREATE_ASSIGNMENTS', 'BULK_EVALUATIONS', 'CREATE_EVALUATION'].includes(
+        kind,
+      )
+    )
+      return undefined;
+    return (await assertDepartmentScope(db, actorId)).map(String).sort();
+  }
+
+  async preview<T extends Record<string, unknown>>(
     kind: ReviewedOperationKind,
     resource: string,
     actorId: bigint,
-    resolve: ResolveReview,
+    resolve: ResolveReview<T>,
   ) {
     return inSerializableTransaction(this.prisma, async (db) => {
       await this.assertAdmin(db, actorId);
       const state = await resolve(db);
+      const authorizationScope = await this.authorizationScope(
+        db,
+        kind,
+        actorId,
+      );
       const expiresAt = new Date(Date.now() + 15 * 60_000);
       const review = await db.reviewed_operations.create({
         data: {
           operation_kind: kind,
           resource_key: resource,
           actor_id: actorId,
-          request_json: reviewJson(state.input),
+          request_json: reviewJson(
+            authorizationScope === undefined
+              ? state.input
+              : { input: state.input, authorization_scope: authorizationScope },
+          ),
           request_fingerprint: reviewFingerprint(state.input),
           snapshot_fingerprint: reviewFingerprint(state.snapshot),
           expires_at: expiresAt,
@@ -134,6 +163,26 @@ export class ReviewedOperationStore {
           message: 'Confirmation differs from the reviewed input.',
         });
       }
+      const authorizationScope = await this.authorizationScope(
+        db,
+        kind,
+        actorId,
+      );
+      const capturedScope = (
+        review.request_json as { authorization_scope?: string[] }
+      )?.authorization_scope;
+      if (
+        authorizationScope !== undefined &&
+        capturedScope !== undefined &&
+        reviewFingerprint(authorizationScope) !==
+          reviewFingerprint(capturedScope)
+      ) {
+        throw new ForbiddenException({
+          code: 'REVIEW_SCOPE_CHANGED',
+          message:
+            'Administrator department access changed. This review or receipt cannot be replayed with different access.',
+        });
+      }
       if (review.completed_at) {
         return {
           ...(review.result_json as Record<string, unknown>),
@@ -151,6 +200,13 @@ export class ReviewedOperationStore {
       try {
         state = await resolve(db);
       } catch (error) {
+        if (
+          error instanceof ConflictException &&
+          ['EVALUATION_EXISTS', 'ASSIGNMENT_EXISTS'].includes(
+            (error.getResponse() as { code?: string }).code ?? '',
+          )
+        )
+          throw error;
         if (
           error instanceof BadRequestException ||
           error instanceof NotFoundException ||

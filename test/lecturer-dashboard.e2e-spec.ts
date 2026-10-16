@@ -1,3 +1,7 @@
+import {
+  isolatedEvaluationOffering,
+  releaseIsolatedOfferings,
+} from './utils/isolated-evaluation-offering';
 import { baseFixtures } from './utils/base-fixtures';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
@@ -12,7 +16,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 
 describe('Lecturer Dashboard (e2e)', () => {
   let app: INestApplication;
- let baseline: Awaited<ReturnType<typeof baseFixtures>>;
+  let baseline: Awaited<ReturnType<typeof baseFixtures>>;
   let prisma: PrismaService;
   let adminToken: string;
   let sokDaraToken: string; // lecturer of offering 1
@@ -39,21 +43,45 @@ describe('Lecturer Dashboard (e2e)', () => {
   const admin = () => as(adminToken);
 
   async function newVersion(questions: Record<string, unknown>[]) {
-    const id = (await api().post(`/api/surveys/${tempSurveyId}/versions`).set(admin()).send({})).body.id as string;
+    const id = (
+      await api()
+        .post(`/api/surveys/${tempSurveyId}/versions`)
+        .set(admin())
+        .send({})
+    ).body.id as string;
     versionIds.push(id);
     const qIds: string[] = [];
     for (const q of questions) {
-      qIds.push((await api().post(`/api/survey-versions/${id}/questions`).set(admin()).send(q)).body.id);
+      qIds.push(
+        (
+          await api()
+            .post(`/api/survey-versions/${id}/questions`)
+            .set(admin())
+            .send(q)
+        ).body.id,
+      );
     }
     return { id, qIds };
   }
 
-  async function newEvaluation(offeringId: string, versionId: string, open: boolean) {
+  const isolatedOfferings: bigint[] = [];
+  async function newEvaluation(
+    offeringId: string,
+    versionId: string,
+    open: boolean,
+  ) {
+    offeringId = await isolatedEvaluationOffering(
+      app.get(PrismaService),
+      offeringId,
+      isolatedOfferings,
+    );
     const id = (
-      await api()
-        .post('/api/evaluations')
-        .set(admin())
-        .send({ course_offering_id: offeringId, survey_version_id: versionId, start_at: hourAgo, end_at: nextWeek })
+      await api().post('/api/evaluations').set(admin()).send({
+        course_offering_id: offeringId,
+        survey_version_id: versionId,
+        start_at: hourAgo,
+        end_at: nextWeek,
+      })
     ).body.id as string;
     evalIds.push(id);
     if (open) await api().post(`/api/evaluations/${id}/open`).set(admin());
@@ -70,13 +98,18 @@ describe('Lecturer Dashboard (e2e)', () => {
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api');
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     await app.init();
- baseline = await baseFixtures(app.get(PrismaService));
+    baseline = await baseFixtures(app.get(PrismaService));
     prisma = app.get(PrismaService);
 
     const login = (email: string) =>
-      api().post('/api/auth/login').send({ identifier: email, password: 'Password123' }).then((res) => res.body.access_token);
+      api()
+        .post('/api/auth/login')
+        .send({ identifier: email, password: 'Password123' })
+        .then((res) => res.body.access_token);
 
     adminToken = await login('admin@itc.edu.kh');
     sokDaraToken = await login('sokdara@itc.edu.kh');
@@ -87,7 +120,12 @@ describe('Lecturer Dashboard (e2e)', () => {
       await login('student3@itc.edu.kh'),
     ];
 
-    tempSurveyId = (await api().post('/api/surveys').set(admin()).send({ title: `E2E Dashboard ${stamp}` })).body.id;
+    tempSurveyId = (
+      await api()
+        .post('/api/surveys')
+        .set(admin())
+        .send({ title: `E2E Dashboard ${stamp}` })
+    ).body.id;
 
     const main = await newVersion([
       { question_text: 'Explains clearly', question_type: 'RATING' },
@@ -118,11 +156,15 @@ describe('Lecturer Dashboard (e2e)', () => {
     }
     await api().post(`/api/evaluations/${closedEvalId}/close`).set(admin());
 
-    const other = await newVersion([{ question_text: 'Overall', question_type: 'RATING' }]);
+    const other = await newVersion([
+      { question_text: 'Overall', question_type: 'RATING' },
+    ]);
     openEvalId = await newEvaluation(baseline.offering1, other.id, true);
 
     chanThyEvalId = await newEvaluation(baseline.offering2, other.id, true);
-    const third = await newVersion([{ question_text: 'Overall', question_type: 'RATING' }]);
+    const third = await newVersion([
+      { question_text: 'Overall', question_type: 'RATING' },
+    ]);
     draftEvalId = await newEvaluation(baseline.offering1, third.id, false);
   }, 90000);
 
@@ -130,20 +172,34 @@ describe('Lecturer Dashboard (e2e)', () => {
     const eIds = evalIds.map((id) => BigInt(id));
     const vIds = versionIds.map((id) => BigInt(id));
 
-    await prisma.answers.deleteMany({ where: { responses: { evaluation_id: { in: eIds } } } });
-    await prisma.responses.deleteMany({ where: { evaluation_id: { in: eIds } } });
-    await prisma.evaluation_participants.deleteMany({ where: { evaluation_id: { in: eIds } } });
+    await prisma.answers.deleteMany({
+      where: { responses: { evaluation_id: { in: eIds } } },
+    });
+    await prisma.responses.deleteMany({
+      where: { evaluation_id: { in: eIds } },
+    });
+    await prisma.evaluation_participants.deleteMany({
+      where: { evaluation_id: { in: eIds } },
+    });
     await prisma.evaluations.deleteMany({ where: { id: { in: eIds } } });
-    await prisma.questions.deleteMany({ where: { survey_version_id: { in: vIds } } });
-    await prisma.survey_versions.deleteMany({ where: { survey_id: BigInt(tempSurveyId) } });
-    if (tempSurveyId) await prisma.surveys.delete({ where: { id: BigInt(tempSurveyId) } });
+    await prisma.questions.deleteMany({
+      where: { survey_version_id: { in: vIds } },
+    });
+    await prisma.survey_versions.deleteMany({
+      where: { survey_id: BigInt(tempSurveyId) },
+    });
+    if (tempSurveyId)
+      await prisma.surveys.delete({ where: { id: BigInt(tempSurveyId) } });
 
+    await releaseIsolatedOfferings(prisma, isolatedOfferings);
     await app.close();
   });
 
   describe('access control', () => {
     it('STUDENT is blocked -> 403', async () => {
-      const res = await api().get('/api/lecturer/evaluations').set(as(studentTokens[0]));
+      const res = await api()
+        .get('/api/lecturer/evaluations')
+        .set(as(studentTokens[0]));
       expect(res.status).toBe(403);
     });
 
@@ -155,7 +211,9 @@ describe('Lecturer Dashboard (e2e)', () => {
 
   describe('GET /api/lecturer/evaluations', () => {
     it('shows my open and closed evaluations with counts, not drafts', async () => {
-      const res = await api().get('/api/lecturer/evaluations').set(as(sokDaraToken));
+      const res = await api()
+        .get('/api/lecturer/evaluations')
+        .set(as(sokDaraToken));
       const closed = res.body.find((e: any) => e.id === closedEvalId);
       const open = res.body.find((e: any) => e.id === openEvalId);
 
@@ -167,8 +225,12 @@ describe('Lecturer Dashboard (e2e)', () => {
     });
 
     it("does not show another lecturer's evaluations", async () => {
-      const mine = await api().get('/api/lecturer/evaluations').set(as(sokDaraToken));
-      const theirs = await api().get('/api/lecturer/evaluations').set(as(chanThyToken));
+      const mine = await api()
+        .get('/api/lecturer/evaluations')
+        .set(as(sokDaraToken));
+      const theirs = await api()
+        .get('/api/lecturer/evaluations')
+        .set(as(chanThyToken));
 
       expect(mine.body.some((e: any) => e.id === chanThyEvalId)).toBe(false);
       expect(theirs.body.some((e: any) => e.id === closedEvalId)).toBe(false);
@@ -189,11 +251,21 @@ describe('Lecturer Dashboard (e2e)', () => {
 
     it('per-question averages and distributions are exact', async () => {
       const res = await dashboard(closedEvalId, sokDaraToken);
-      const question1 = res.body.questions.find((q: any) => q.question_id === q1);
-      const question2 = res.body.questions.find((q: any) => q.question_id === q2);
+      const question1 = res.body.questions.find(
+        (q: any) => q.question_id === q1,
+      );
+      const question2 = res.body.questions.find(
+        (q: any) => q.question_id === q2,
+      );
 
       expect(question1.average).toBe(4.67);
-      expect(question1.distribution).toEqual({ '1': 0, '2': 0, '3': 0, '4': 1, '5': 2 });
+      expect(question1.distribution).toEqual({
+        '1': 0,
+        '2': 0,
+        '3': 0,
+        '4': 1,
+        '5': 2,
+      });
       expect(question2.average).toBe(2.67);
       expect(question2.distribution).toEqual({ '1': 0, '2': 1, '3': 2 });
     });
@@ -205,7 +277,9 @@ describe('Lecturer Dashboard (e2e)', () => {
 
     it('TEXT questions are not part of the dashboard', async () => {
       const res = await dashboard(closedEvalId, sokDaraToken);
-      expect(res.body.questions.some((q: any) => q.question_id === q3)).toBe(false);
+      expect(res.body.questions.some((q: any) => q.question_id === q3)).toBe(
+        false,
+      );
     });
 
     it('contains nothing that identifies a student', async () => {

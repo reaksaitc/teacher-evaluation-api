@@ -1,3 +1,4 @@
+import { assertDepartmentScope } from '../common/utils/department-scope.util';
 import { resolveStudentPlacement } from '../common/utils/student-placement.util';
 import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import {
@@ -19,6 +20,7 @@ import { UpdateStudentDto } from './dto/update-student.dto';
 import { StudentQueryDto } from './dto/student-query.dto';
 import { StudentEvaluationProgressService } from './student-evaluation-progress.service';
 
+import { assertCohortMajor } from '../student-generations/generation-identity.util';
 const BCRYPT_ROUNDS = 10;
 
 const studentSelect = {
@@ -45,6 +47,11 @@ const studentSelect = {
 
   student_generations: {
     select: {
+      major_id: true,
+      generation_number: true,
+      majors: {
+        select: { id: true, code: true, name: true, department_id: true },
+      },
       id: true,
       name: true,
       entry_academic_year_id: true,
@@ -418,8 +425,17 @@ export class StudentsService {
         },
         select: {
           id: true,
+          major_id: true,
         },
       });
+      if (
+        generation?.major_id != null &&
+        majorId !== undefined &&
+        generation.major_id !== majorId
+      )
+        throw new BadRequestException(
+          'Generation does not belong to selected major',
+        );
 
       if (!generation) {
         throw new NotFoundException('Student generation not found');
@@ -562,6 +578,16 @@ export class StudentsService {
     return {
       academic_year_id: academicYearId.toString(),
 
+      generation: await this.prisma.student_generations.findUnique({
+        where: { id: generationId },
+        select: {
+          id: true,
+          name: true,
+          major_id: true,
+          generation_number: true,
+          majors: { select: { id: true, code: true, name: true } },
+        },
+      }),
       generation_id: generationId.toString(),
 
       major_id: majorId.toString(),
@@ -758,36 +784,39 @@ export class StudentsService {
     };
   }
 
-  private async ensureGenerationExists(generationId: bigint) {
+  private async ensureGenerationExists(generationId: bigint, majorId?: bigint) {
     const generation = await this.prisma.student_generations.findUnique({
       where: {
         id: generationId,
       },
       select: {
         id: true,
+        major_id: true,
       },
     });
 
     if (!generation) {
       throw new NotFoundException('Student generation not found');
     }
+    if (majorId !== undefined) assertCohortMajor(generation, majorId);
+    return generation;
   }
 
-  async create(dto: CreateStudentDto) {
+  async create(dto: CreateStudentDto, actorId?: bigint) {
     return inSerializableTransaction(
       this.prisma,
       (db) =>
         new StudentsService(
           db,
           this.studentEvaluationProgressService,
-        ).createInTransaction(dto),
+        ).createInTransaction(dto, actorId),
       (error: any) => {
         this.handlePrismaError(error);
       },
     );
   }
 
-  private async createInTransaction(dto: CreateStudentDto) {
+  private async createInTransaction(dto: CreateStudentDto, actorId?: bigint) {
     const studentCode = normalizeStudentCode(dto.student_code);
 
     const email = dto.email === undefined ? null : normalizeEmail(dto.email);
@@ -797,11 +826,20 @@ export class StudentsService {
     const academicYearId = BigInt(dto.academic_year_id);
 
     const majorId = BigInt(dto.major_id);
+    if (actorId !== undefined) {
+      const context = await this.prisma.majors.findUnique({
+        where: { id: majorId },
+        include: { departments: true },
+      });
+      if (!context || context.departments.status !== 'ACTIVE')
+        throw new BadRequestException('Choose a major in an active department');
+      await assertDepartmentScope(this.prisma, actorId, context.department_id);
+    }
 
     /*
      * Validate all references before writing anything.
      */
-    await this.ensureGenerationExists(generationId);
+    await this.ensureGenerationExists(generationId, majorId);
 
     const [academicYear, major] = await Promise.all([
       this.prisma.academic_years.findUnique({
@@ -925,6 +963,7 @@ export class StudentsService {
       select: {
         id: true,
         user_id: true,
+        generation_id: true,
       },
     });
 
@@ -937,7 +976,10 @@ export class StudentsService {
     if (dto.generation_id !== undefined) {
       generationId = BigInt(dto.generation_id);
 
-      await this.ensureGenerationExists(generationId);
+      if (generationId !== existingStudent.generation_id)
+        throw new ConflictException(
+          'Cohort reassignment requires an approved migration policy',
+        );
     }
 
     const normalizedStudentCode =

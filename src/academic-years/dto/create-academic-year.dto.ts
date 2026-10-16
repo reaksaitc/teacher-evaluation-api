@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsBoolean,
   IsDateString,
@@ -9,9 +10,51 @@ import {
   Max,
   MaxLength,
   Min,
+  IsArray,
+  ArrayMaxSize,
+  ValidateNested,
 } from 'class-validator';
 
+export class SetupSemesterDatesDto {
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsDateString()
+  start_date?: string | null;
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsDateString()
+  end_date?: string | null;
+}
+
 export class CreateAcademicYearDto {
+  @ApiPropertyOptional({
+    description:
+      'Stable retry key; required by atomic setup/recovery endpoints',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  idempotency_key?: string;
+
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      'Explicitly create missing Semester 1 and 2 in the same transaction',
+  })
+  @IsOptional()
+  @IsBoolean()
+  create_semesters?: boolean;
+
+  @ApiPropertyOptional({
+    type: [SetupSemesterDatesDto],
+    description: 'Optional Semester 1 and 2 dates in number order',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(2)
+  @ValidateNested({ each: true })
+  @Type(() => SetupSemesterDatesDto)
+  semesters?: SetupSemesterDatesDto[];
   @ApiProperty({
     maxLength: 20,
     example: '2026-2027',

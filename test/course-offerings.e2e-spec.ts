@@ -28,6 +28,7 @@ describe('Course Offerings (e2e)', () => {
   const testCourseCode = `E2E-CO-${Date.now()}`;
 
   let validBody: {
+    year_level: number;
     course_id: string;
     lecturer_id: string;
     semester_id: string;
@@ -107,6 +108,25 @@ describe('Course Offerings (e2e)', () => {
         },
       });
 
+      const major = await tx.majors.findFirstOrThrow({
+        where: { department_id: department.id },
+      });
+      for (const level of [1, 2])
+        await tx.course_year_rules.create({
+          data: {
+            course_id: course.id,
+            major_id: major.id,
+            year_level: level,
+            revisions: {
+              create: {
+                revision_no: 1,
+                effective_academic_year_id: academicYear.id,
+                effective_start_year: 2026,
+                enabled: true,
+              },
+            },
+          },
+        });
       const protectedOffering = await tx.course_offerings.create({
         data: {
           course_id: course.id,
@@ -141,6 +161,7 @@ describe('Course Offerings (e2e)', () => {
     protectedOfferingId = fixtures.protectedOfferingId;
 
     validBody = {
+      year_level: 1,
       course_id: courseId.toString(),
       lecturer_id: lecturer.id.toString(),
       semester_id: semesterId.toString(),
@@ -167,6 +188,12 @@ describe('Course Offerings (e2e)', () => {
           });
           await tx.course_offerings.deleteMany({
             where: { id: { in: offeringIds } },
+          });
+          await tx.curriculum_revisions.deleteMany({
+            where: { rule: { course_id: courseId } },
+          });
+          await tx.course_year_rules.deleteMany({
+            where: { course_id: courseId },
           });
           await tx.courses.delete({
             where: { id: courseId! },
@@ -285,7 +312,8 @@ describe('Course Offerings (e2e)', () => {
       course_id: validBody.course_id,
       lecturer_id: validBody.lecturer_id,
       semester_id: validBody.semester_id,
-      class_type: class_type.COURSE,
+      class_type: class_type.TD,
+      year_level: 1,
     });
 
     it('first offering without a section -> 201', async () => {
@@ -325,9 +353,42 @@ describe('Course Offerings (e2e)', () => {
 
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body.map((offering: any) => offering.id)).toContain(
+        String(protectedOfferingId),
+      );
+      expect(res.body.map((offering: any) => offering.id)).not.toContain(
+        createdOfferingId,
+      );
       for (const offering of res.body) {
         expect(offering.users.password_hash).toBeUndefined();
       }
+    });
+
+    it('students can read an enrolled offering but cannot read another offering', async () => {
+      const enrolled = await request(app.getHttpServer())
+        .get(`/api/course-offerings/${protectedOfferingId}`)
+        .set('Authorization', `Bearer ${studentToken}`);
+      expect(enrolled.status).toBe(200);
+      expect(enrolled.body.users.password_hash).toBeUndefined();
+      const unrelated = await request(app.getHttpServer())
+        .get(`/api/course-offerings/${createdOfferingId}`)
+        .set('Authorization', `Bearer ${studentToken}`);
+      expect(unrelated.status).toBe(403);
+    });
+
+    it('lecturer reads remain available for owned offerings', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/course-offerings')
+        .set('Authorization', `Bearer ${lecturerToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.map((offering: any) => offering.id)).toContain(
+        createdOfferingId,
+      );
+      expect(
+        res.body.every(
+          (offering: any) => offering.lecturer_id === validBody.lecturer_id,
+        ),
+      ).toBe(true);
     });
 
     it('nonexistent offering id -> 404', async () => {

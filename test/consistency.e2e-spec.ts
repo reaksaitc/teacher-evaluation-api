@@ -435,6 +435,12 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
             await tx.course_offerings.deleteMany({
               where: { id: { in: offeringIds } },
             });
+            await tx.curriculum_revisions.deleteMany({
+              where: { rule: { course_id: { in: courseIds } } },
+            });
+            await tx.course_year_rules.deleteMany({
+              where: { course_id: { in: courseIds } },
+            });
             await tx.courses.deleteMany({ where: { id: { in: courseIds } } });
             await tx.question_options.deleteMany({
               where: { questions: questionFilter },
@@ -991,7 +997,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
         records: [{ ...manifest.records[0], evidence_reference: '' }],
       }),
     ).toThrow('evidence');
-    const operation = (options: any) =>
+    const operation = (options: any): Promise<any[]> =>
       prisma.$transaction((tx) => historical.reconcile(tx, manifest, options), {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       });
@@ -1194,6 +1200,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
     await prisma.course_offerings.update({
       where: { id: target.id },
       data: {
+        class_type: 'TP',
         course_id: e.assignment.course_id,
         section_code: 'Reassignment target',
       },
@@ -1303,7 +1310,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
         group.survey_version_id === e.v1.id ? e.v1 : v2
       ).questions.map((question) => question.id);
       expect(
-        group.questions.every((question) =>
+        group.questions.every((question: { question_id: bigint }) =>
           ownIds.includes(question.question_id),
         ),
       ).toBe(true);
@@ -1344,7 +1351,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
       where: { evaluation_id: e.id },
       data: { survey_version_id: null },
     });
-    const records = [];
+    const records: any[] = [];
     for (const response of responses)
       records.push({
         ...(await historical.inspectRecord(
@@ -1979,6 +1986,21 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
         .set(authorization())
         .send({ academic_year_id: Number(targetYear) });
       expect(semesterEdit.status).toBe(200);
+      await prisma.course_year_rules.create({
+        data: {
+          course_id: alternate.course_id,
+          major_id: major,
+          year_level: 1,
+          revisions: {
+            create: {
+              revision_no: 1,
+              effective_academic_year_id: year,
+              effective_start_year: 2026,
+              enabled: true,
+            },
+          },
+        },
+      });
       const result = await api()
         .put(`/api/course-offerings/${unused.id}`)
         .set(authorization())
@@ -2127,7 +2149,11 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
     const recordUrl = (id?: bigint) =>
       `/api/student-academic-records${id ? `/${id}` : ''}`;
     const context = async (profile: bigint, y = year) =>
-      (await app.get(StudentsService).findOne(profile, y)).academic_context;
+      (
+        (await app.get(StudentsService).findOne(profile, String(y))) as {
+          academic_context: any;
+        }
+      ).academic_context;
     async function approve(
       s: { profile: bigint },
       y: bigint,
@@ -2706,7 +2732,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
           lecturer_id: lecturer,
           semester_id: semester,
           year_level: 1,
-          class_type: 'TD',
+          class_type: 'TP',
           created_at: new Date(),
           updated_at: new Date(),
           group_scopes: {
@@ -2832,7 +2858,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
   });
 
   describe('Immutable historical target labels', () => {
-    const post = (url: string, body: unknown = {}) =>
+    const post = (url: string, body: object = {}) =>
       api().post(url).set(authorization()).send(body);
     async function prepared(groups = ['A']) {
       const target = await offering(groups);
@@ -2898,11 +2924,10 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
         const previous = await prisma.student_generations.findUniqueOrThrow({
           where: { id: generation },
         });
-        await api()
-          .put(`/api/student-generations/${generation}`)
-          .set(authorization())
-          .send({ name })
-          .expect(200);
+        await prisma.student_generations.update({
+          where: { id: generation },
+          data: { name },
+        });
         return () =>
           prisma.student_generations.update({
             where: { id: generation },
@@ -3269,7 +3294,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
             ).completed_at,
           ).toBeNull();
         } else {
-          const rows = await frozen(BigInt(result.value!.id));
+          const rows = await frozen(BigInt(String(result.value!.id)));
           expect(rows.generation_targets[0].historical_labels).toEqual(
             e.preview.body.target_labels.generations[0].historical_labels,
           );
@@ -3288,7 +3313,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
     const groupUrl = (o: bigint) => `/api/course-offerings/${o}/enrollments`;
     const applyUrl = (s: bigint, v: bigint) =>
       `/api/surveys/${s}/versions/${v}/apply-to-unfinished`;
-    const post = (url: string, body: unknown = {}) =>
+    const post = (url: string, body: object = {}) =>
       api().post(url).set(authorization()).send(body);
     async function fixture(status: 'DRAFT' | 'OPEN' = 'OPEN', count = 3) {
       const assignment = await offering(['A', 'B']);

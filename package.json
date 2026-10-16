@@ -23,7 +23,10 @@
     "test:e2e:generate": "node test/run-e2e.cjs generate",
     "test:e2e:migrate": "node test/run-e2e.cjs migrate",
     "test:e2e:seed": "node test/seed-e2e.cjs",
-    "test:e2e": "node test/run-e2e.cjs test"
+    "test:e2e": "node test/run-e2e.cjs test",
+    "setup:first-admin": "node scripts/provision-first-admin.cjs",
+    "cohorts:preflight": "node scripts/cohort-migration.cjs",
+    "test:alignment:prepare": "node scripts/prepare-alignment-test.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

@@ -1,3 +1,4 @@
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import {
   Body,
   Controller,
@@ -88,9 +89,7 @@ export class StudentGenerationsController {
     status: 404,
     description: 'Student generation not found',
   })
-  findOne(
-    @Param('id', ParseBigIntPipe) id: bigint,
-  ) {
+  findOne(@Param('id', ParseBigIntPipe) id: bigint) {
     return this.studentGenerationsService.findOne(id);
   }
 
@@ -109,7 +108,10 @@ export class StudentGenerationsController {
       example: studentGenerationExample,
     },
   })
-  @ApiResponse({ status: 400, description: 'Invalid input; starting_year_level must be between 1 and 5' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid input; starting_year_level must be between 1 and 5',
+  })
   @ApiResponse({
     status: 404,
     description: 'Academic year not found',
@@ -121,9 +123,11 @@ export class StudentGenerationsController {
   create(
     @Body()
     createStudentGenerationDto: CreateStudentGenerationDto,
+    @CurrentUser() actor: { id: bigint },
   ) {
     return this.studentGenerationsService.create(
       createStudentGenerationDto,
+      actor.id,
     );
   }
 
@@ -147,25 +151,28 @@ export class StudentGenerationsController {
       example: studentGenerationExample,
     },
   })
-  @ApiResponse({ status: 400, description: 'Invalid input; starting_year_level must be between 1 and 5' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid input; starting_year_level must be between 1 and 5',
+  })
   @ApiResponse({
     status: 404,
-    description:
-      'Student generation or academic year not found',
+    description: 'Student generation or academic year not found',
   })
   @ApiResponse({
     status: 409,
-    description:
-      'Student generation already exists or is currently in use',
+    description: 'Student generation already exists or is currently in use',
   })
   update(
     @Param('id', ParseBigIntPipe) id: bigint,
     @Body()
     updateStudentGenerationDto: UpdateStudentGenerationDto,
+    @CurrentUser() actor: { id: bigint },
   ) {
     return this.studentGenerationsService.update(
       id,
       updateStudentGenerationDto,
+      actor.id,
     );
   }
 
@@ -192,9 +199,7 @@ export class StudentGenerationsController {
     description:
       'Student generation has students or evaluation references and cannot be deleted',
   })
-  remove(
-    @Param('id', ParseBigIntPipe) id: bigint,
-  ) {
+  remove(@Param('id', ParseBigIntPipe) id: bigint) {
     return this.studentGenerationsService.remove(id);
   }
 }

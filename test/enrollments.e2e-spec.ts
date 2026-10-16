@@ -124,6 +124,21 @@ describe('Enrollments (e2e)', () => {
       },
     });
     courseId = course.id;
+    await prisma.course_year_rules.create({
+      data: {
+        course_id: course.id,
+        major_id: placement.major_id,
+        year_level: placement.year_level,
+        revisions: {
+          create: {
+            revision_no: 1,
+            effective_academic_year_id: academicYear.id,
+            effective_start_year: 2026,
+            enabled: true,
+          },
+        },
+      },
+    });
 
     const offering = await request(app.getHttpServer())
       .post('/api/course-offerings')
@@ -133,6 +148,7 @@ describe('Enrollments (e2e)', () => {
         lecturer_id: lecturerId,
         semester_id: semester.id.toString(),
         class_type: 'COURSE',
+        year_level: placement.year_level,
         section_code: `E2E-ENR-${stamp}`,
       });
 
@@ -160,6 +176,14 @@ describe('Enrollments (e2e)', () => {
             });
           }
 
+          if (courseId) {
+            await tx.curriculum_revisions.deleteMany({
+              where: { rule: { course_id: courseId } },
+            });
+            await tx.course_year_rules.deleteMany({
+              where: { course_id: courseId },
+            });
+          }
           if (courseId !== undefined) {
             await tx.courses.deleteMany({
               where: { id: courseId },
@@ -383,7 +407,7 @@ describe('Enrollments (e2e)', () => {
             lecturer_id: BigInt(lecturerId),
             semester_id: semesterId!,
             year_level: 1,
-            class_type: 'COURSE',
+            class_type: 'TD',
             section_code: `SCOPE-${stamp}`,
             created_at: now,
             updated_at: now,

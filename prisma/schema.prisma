@@ -7,6 +7,40 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model operation_receipts {
+  id                  String   @id @default(uuid()) @db.Uuid
+  actor_id            BigInt
+  operation           String   @db.VarChar(60)
+  idempotency_key     String   @db.VarChar(128)
+  request_fingerprint String   @db.VarChar(64)
+  result_json         Json
+  created_at          DateTime @default(now()) @db.Timestamp(6)
+
+  @@unique([actor_id, operation, idempotency_key])
+}
+
+model evaluation_activity {
+  id            BigInt   @id @default(autoincrement())
+  evaluation_id BigInt
+  action        String   @db.VarChar(30)
+  occurred_at   DateTime @default(now()) @db.Timestamp(6)
+  actor_id      BigInt?
+  actor_name    String?  @db.VarChar(150)
+  before_json   Json?
+  after_json    Json?
+
+  @@index([evaluation_id, occurred_at, id])
+}
+
+model setup_audit {
+  id                  BigInt   @id @default(autoincrement())
+  destination_year_id BigInt
+  source_year_id      BigInt?
+  actor_id            BigInt
+  details             Json
+  created_at          DateTime @default(now()) @db.Timestamp(6)
+}
+
 model answers {
   id             BigInt           @id @default(autoincrement())
   response_id    BigInt
@@ -102,6 +136,7 @@ model majors {
   course_year_rules            course_year_rules[]
   course_offering_group_scopes course_offering_group_scopes[]
   evaluation_group_targets     evaluation_group_targets[]
+  student_generations          student_generations[]
 
   @@unique([department_id, name], map: "majors_department_id_name_idx")
 }
@@ -109,17 +144,23 @@ model majors {
 model student_generations {
   // SQL owns starting_year_level BETWEEN 1 AND 5.
   id                     BigInt   @id @default(autoincrement())
-  name                   String   @unique @db.VarChar(100)
+  // Retained display/legacy label; identity is (major_id, generation_number).
+  name                   String   @db.VarChar(100)
+  major_id               BigInt?
+  generation_number      Int?
   entry_academic_year_id BigInt
   starting_year_level    Int      @default(1)
   created_at             DateTime @default(now()) @db.Timestamp(6)
   updated_at             DateTime @updatedAt @db.Timestamp(6)
 
   entry_academic_year          academic_years                  @relation(fields: [entry_academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  majors                       majors?                         @relation(fields: [major_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   students                     students[]
   evaluation_targets           evaluation_generation_targets[]
   course_offering_group_scopes course_offering_group_scopes[]
   evaluation_group_targets     evaluation_group_targets[]
+
+  @@unique([major_id, generation_number])
 }
 
 model students {
@@ -158,15 +199,16 @@ model student_academic_records {
 model course_offerings {
   // SQL owns the nullable level CHECK and NULLS NOT DISTINCT on the index below.
   // Keep the six-field compound selector; migrate deploy preserves SQL semantics.
-  id           BigInt      @id @default(autoincrement())
-  course_id    BigInt
-  lecturer_id  BigInt
-  semester_id  BigInt
-  year_level   Int?
-  class_type   class_type?
-  section_code String?     @db.VarChar(50)
-  created_at   DateTime    @db.Timestamp(6)
-  updated_at   DateTime    @db.Timestamp(6)
+  id                 BigInt      @id @default(autoincrement())
+  course_id          BigInt
+  lecturer_id        BigInt
+  semester_id        BigInt
+  year_level         Int?
+  class_type         class_type?
+  section_code       String?     @db.VarChar(50)
+  source_offering_id BigInt?
+  created_at         DateTime    @db.Timestamp(6)
+  updated_at         DateTime    @db.Timestamp(6)
 
   courses      courses                        @relation(fields: [course_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   users        users                          @relation(fields: [lecturer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -264,13 +306,14 @@ model enrollments {
 }
 
 model evaluation_participants {
-  id                BigInt    @id @default(autoincrement())
-  evaluation_id     BigInt
-  student_id        BigInt
-  survey_version_id BigInt?
-  has_submitted     Boolean   @default(false)
-  submitted_at      DateTime? @db.Timestamp(6)
-  created_at        DateTime  @db.Timestamp(6)
+  id                 BigInt    @id @default(autoincrement())
+  evaluation_id      BigInt
+  student_id         BigInt
+  survey_version_id  BigInt?
+  has_submitted      Boolean   @default(false)
+  submitted_at       DateTime? @db.Timestamp(6)
+  placement_snapshot Json?
+  created_at         DateTime  @db.Timestamp(6)
 
   evaluations       evaluations        @relation(fields: [evaluation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   users             users              @relation(fields: [student_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -373,11 +416,14 @@ model question_options {
 }
 
 model responses {
-  id                BigInt   @id @default(autoincrement())
-  evaluation_id     BigInt
-  survey_version_id BigInt?
-  submitted_at      DateTime @db.Timestamp(6)
-  created_at        DateTime @db.Timestamp(6)
+  id                   BigInt   @id @default(autoincrement())
+  evaluation_id        BigInt
+  survey_version_id    BigInt?
+  // Anonymous evaluation-time cohort tag; never a student/participant reference.
+  audience_major_id    BigInt?
+  audience_major_label Json?
+  submitted_at         DateTime @db.Timestamp(6)
+  created_at           DateTime @db.Timestamp(6)
 
   answers         answers[]
   evaluations     evaluations      @relation(fields: [evaluation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)

@@ -1,3 +1,4 @@
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import {
   Body,
   Controller,
@@ -105,8 +106,8 @@ export class CourseOfferingsController {
       example: [offeringExample],
     },
   })
-  findAll() {
-    return this.courseOfferingsService.findAll();
+  findAll(@CurrentUser() actor: { id: bigint }) {
+    return this.courseOfferingsService.findAll(actor.id);
   }
 
   @Get(':id')
@@ -129,8 +130,11 @@ export class CourseOfferingsController {
     status: 404,
     description: 'Course offering not found',
   })
-  findOne(@Param('id', ParseBigIntPipe) id: bigint) {
-    return this.courseOfferingsService.findOne(id);
+  findOne(
+    @Param('id', ParseBigIntPipe) id: bigint,
+    @CurrentUser() actor: { id: bigint },
+  ) {
+    return this.courseOfferingsService.findOne(id, actor.id);
   }
 
   @Post()
@@ -157,8 +161,11 @@ export class CourseOfferingsController {
     description:
       'Duplicate offering, no applicable enabled curriculum revision, or obsolete/mismatched selected revision',
   })
-  create(@Body() dto: CreateCourseOfferingDto) {
-    return this.courseOfferingsService.create(dto);
+  create(
+    @Body() dto: CreateCourseOfferingDto,
+    @CurrentUser() actor: { id: bigint },
+  ) {
+    return this.courseOfferingsService.create(dto, actor.id);
   }
 
   @Put(':id')
@@ -197,8 +204,9 @@ export class CourseOfferingsController {
   update(
     @Param('id', ParseBigIntPipe) id: bigint,
     @Body() dto: UpdateCourseOfferingDto,
+    @CurrentUser() actor: { id: bigint },
   ) {
-    return this.courseOfferingsService.update(id, dto);
+    return this.courseOfferingsService.update(id, dto, actor.id);
   }
 
   @Delete(':id')
@@ -224,7 +232,10 @@ export class CourseOfferingsController {
     status: 409,
     description: 'Course offering has enrollments or evaluations',
   })
-  async remove(@Param('id', ParseBigIntPipe) id: bigint) {
-    await this.courseOfferingsService.remove(id);
+  async remove(
+    @Param('id', ParseBigIntPipe) id: bigint,
+    @CurrentUser() actor: { id: bigint },
+  ) {
+    await this.courseOfferingsService.remove(id, actor.id);
   }
 }

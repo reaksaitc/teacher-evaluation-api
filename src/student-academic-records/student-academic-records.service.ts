@@ -46,6 +46,11 @@ const academicRecordSelect = {
 
       student_generations: {
         select: {
+          major_id: true,
+          generation_number: true,
+          majors: {
+            select: { id: true, code: true, name: true, department_id: true },
+          },
           id: true,
           name: true,
           entry_academic_year_id: true,

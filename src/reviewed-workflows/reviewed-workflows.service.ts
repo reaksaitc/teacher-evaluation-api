@@ -1,3 +1,4 @@
+import { assertDepartmentScope } from '../common/utils/department-scope.util';
 import { progressionRecordSelect } from '../common/utils/student-placement.util';
 import {
   BadRequestException,
@@ -49,6 +50,7 @@ function enrollmentInput(
 function creationInput(dto: CreateEvaluationDto, confirmed: string[]) {
   const scope = dto.group_scope;
   return {
+    publish: dto.publish ?? false,
     course_offering_id: id(dto.course_offering_id),
     survey_id: id(dto.survey_id),
     survey_version_id: id(dto.survey_version_id),
@@ -65,6 +67,15 @@ function creationInput(dto: CreateEvaluationDto, confirmed: string[]) {
           class_groups: groups(scope.class_groups),
         }
       : null,
+    major_ids: dto.major_ids === undefined ? null : ids(dto.major_ids),
+    group_scopes:
+      dto.group_scopes?.map((scope) => ({
+        academic_year_id: id(scope.academic_year_id),
+        generation_id: id(scope.generation_id),
+        major_id: id(scope.major_id),
+        year_level: scope.year_level,
+        class_groups: groups(scope.class_groups),
+      })) ?? null,
     confirmed_student_ids: ids(confirmed),
   };
 }
@@ -275,7 +286,27 @@ export class ReviewedWorkflowsService {
     );
   }
 
-  private async createState(db: PrismaService, dto: CreateEvaluationDto) {
+  private async createState(
+    db: PrismaService,
+    dto: CreateEvaluationDto,
+    actor?: bigint,
+  ) {
+    if (actor !== undefined) {
+      const context = await db.course_offerings.findUnique({
+        where: { id: BigInt(dto.course_offering_id) },
+        include: { courses: true },
+      });
+      if (!context)
+        throw new NotFoundException('Teaching assignment not found');
+      await assertDepartmentScope(db, actor, context.courses.department_id);
+    }
+    if (
+      dto.publish &&
+      (!dto.start_at || !dto.end_at || Date.parse(dto.end_at) <= Date.now())
+    )
+      throw new BadRequestException(
+        'Publication requires start_at and a future end_at',
+      );
     const output = await new EvaluationsService(db).previewReviewedCreate(dto);
     const offering = await this.offeringState(
       db,
@@ -314,7 +345,7 @@ export class ReviewedWorkflowsService {
       'CREATE_EVALUATION',
       dto.course_offering_id,
       actor,
-      (db) => this.createState(db, dto),
+      (db) => this.createState(db, dto, actor),
     );
   }
   confirmCreate(
@@ -329,8 +360,12 @@ export class ReviewedWorkflowsService {
       actor,
       dto.review_id!,
       creationInput(dto, dto.confirmed_student_ids),
-      (db) => this.createState(db, dto),
-      (db) => new EvaluationsService(db).create(dto, actor),
+      (db) => this.createState(db, dto, actor),
+      async (db) => {
+        const evaluations = new EvaluationsService(db);
+        const created = await evaluations.create(dto, actor);
+        return dto.publish ? evaluations.open(created.id, actor) : created;
+      },
     );
   }
 
@@ -583,7 +618,8 @@ export class ReviewedWorkflowsService {
         retain_assigned_version_id: id(dto.retain_assigned_version_id),
       },
       (db) => this.openingState(db, evaluationId),
-      (db) => new EvaluationsService(db).openReviewedAssigned(evaluationId),
+      (db) =>
+        new EvaluationsService(db).openReviewedAssigned(evaluationId, actor),
     );
   }
 

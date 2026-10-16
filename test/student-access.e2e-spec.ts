@@ -1,3 +1,7 @@
+import {
+  isolatedEvaluationOffering,
+  releaseIsolatedOfferings,
+} from './utils/isolated-evaluation-offering';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
@@ -51,7 +55,13 @@ describe('Student Access (e2e)', () => {
 
   const api = () => request(app.getHttpServer());
 
+  const isolatedOfferings: bigint[] = [];
   async function createOpenEvaluation(offeringId: string, versionId: string) {
+    offeringId = await isolatedEvaluationOffering(
+      prisma,
+      offeringId,
+      isolatedOfferings,
+    );
     const created = await api().post('/api/evaluations').set(admin()).send({
       course_offering_id: offeringId,
       survey_version_id: versionId,
@@ -196,7 +206,7 @@ describe('Student Access (e2e)', () => {
             course_id: course.id,
             lecturer_id: lecturer.id,
             semester_id: semester.id,
-            class_type: 'COURSE',
+            class_type: index === 0 ? 'COURSE' : 'TD',
             section_code: `SA-${stamp}-${index}`,
             created_at: now,
             updated_at: now,
@@ -378,6 +388,10 @@ describe('Student Access (e2e)', () => {
             },
           });
 
+          await releaseIsolatedOfferings(
+            tx as PrismaService,
+            isolatedOfferings,
+          );
           const offerings = await tx.course_offerings.findMany({
             where: { course_id: courseId! },
             select: { id: true },

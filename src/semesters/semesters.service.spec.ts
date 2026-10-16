@@ -35,7 +35,9 @@ describe('SemestersService', () => {
     academic_years: {
       findUnique: academicYearFindUniqueMock,
     },
-    evaluations: { count: jest.fn<any>().mockResolvedValue(0) },
+    evaluations: {
+      count: jest.fn<(...args: any[]) => Promise<any>>().mockResolvedValue(0),
+    },
     $transaction: jest.fn(async (callback: (db: any) => Promise<any>) =>
       callback(prismaMock),
     ),

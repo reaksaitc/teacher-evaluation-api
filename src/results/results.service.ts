@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { assertDepartmentScope } from '../common/utils/department-scope.util';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -36,9 +41,16 @@ export class ResultsService {
   // ADMIN - ALL RESULTS
   // =========================================================
 
-  async getAdminResults() {
+  async getAdminResults(majorId?: bigint, actorId?: bigint) {
+    const scope =
+      actorId === undefined
+        ? []
+        : await assertDepartmentScope(this.prisma, actorId);
     const evaluations = await this.prisma.evaluations.findMany({
       where: {
+        ...(scope.length
+          ? { course_offerings: { courses: { department_id: { in: scope } } } }
+          : {}),
         status: {
           not: 'DRAFT',
         },
@@ -52,7 +64,7 @@ export class ResultsService {
     });
 
     return evaluations.map((evaluation) =>
-      this.buildEvaluationResult(evaluation),
+      this.filteredResult(evaluation, majorId),
     );
   }
 
@@ -60,7 +72,15 @@ export class ResultsService {
   // ADMIN - RESULTS FOR ONE LECTURER
   // =========================================================
 
-  async getAdminResultsByLecturer(lecturerId: bigint) {
+  async getAdminResultsByLecturer(
+    lecturerId: bigint,
+    majorId?: bigint,
+    actorId?: bigint,
+  ) {
+    const scope =
+      actorId === undefined
+        ? []
+        : await assertDepartmentScope(this.prisma, actorId);
     const lecturer = await this.prisma.users.findFirst({
       where: {
         id: lecturerId,
@@ -85,6 +105,9 @@ export class ResultsService {
         },
 
         course_offerings: {
+          ...(scope.length
+            ? { courses: { department_id: { in: scope } } }
+            : {}),
           lecturer_id: lecturerId,
         },
       },
@@ -104,7 +127,7 @@ export class ResultsService {
       },
 
       evaluations: evaluations.map((evaluation) =>
-        this.buildEvaluationResult(evaluation),
+        this.filteredResult(evaluation, majorId),
       ),
     };
   }
@@ -113,7 +136,7 @@ export class ResultsService {
   // LECTURER - OWN RESULTS
   // =========================================================
 
-  async getLecturerResults(lecturerId: bigint) {
+  async getLecturerResults(lecturerId: bigint, majorId?: bigint) {
     const lecturer = await this.prisma.users.findFirst({
       where: {
         id: lecturerId,
@@ -155,7 +178,7 @@ export class ResultsService {
       },
 
       evaluations: evaluations.map((evaluation) =>
-        this.buildEvaluationResult(evaluation),
+        this.filteredResult(evaluation, majorId),
       ),
     };
   }
@@ -207,6 +230,16 @@ export class ResultsService {
         include: {
           student_generations: {
             select: {
+              major_id: true,
+              generation_number: true,
+              majors: {
+                select: {
+                  id: true,
+                  code: true,
+                  name: true,
+                  department_id: true,
+                },
+              },
               id: true,
               name: true,
               entry_academic_year_id: true,
@@ -235,6 +268,16 @@ export class ResultsService {
 
           student_generations: {
             select: {
+              major_id: true,
+              generation_number: true,
+              majors: {
+                select: {
+                  id: true,
+                  code: true,
+                  name: true,
+                  department_id: true,
+                },
+              },
               id: true,
               name: true,
             },
@@ -292,6 +335,7 @@ export class ResultsService {
         },
       },
 
+      evaluation_participants: { select: { placement_snapshot: true } },
       _count: {
         select: {
           evaluation_participants: true,
@@ -304,6 +348,69 @@ export class ResultsService {
   // =========================================================
   // BUILD ONE EVALUATION RESULT
   // =========================================================
+
+  private filteredResult(evaluation: any, majorId?: bigint) {
+    const release = {
+      results_available: true,
+      policy: 'CLOSED_ONLY_FOR_LECTURERS',
+      minimum_response_count: null,
+      small_cohort_suppression: 'NOT_CONFIGURED',
+      anonymous_scope: 'WHOLE_EVALUATION_OR_CAPTURED_MAJOR',
+    };
+    if (majorId === undefined)
+      return {
+        ...this.buildEvaluationResult(evaluation),
+        release,
+        audience_filter: {
+          major_id: null,
+          label: 'All targeted majors',
+          available: true,
+        },
+      };
+    const participants = evaluation.evaluation_participants ?? [];
+    if (
+      participants.some((p: any) => !p.placement_snapshot?.major?.id) ||
+      evaluation.responses.some(
+        (response: any) => response.audience_major_id == null,
+      )
+    )
+      throw new ConflictException({
+        code: 'LEGACY_AUDIENCE_UNAVAILABLE',
+        message:
+          'This report includes historical records without captured major metadata; combined results remain available',
+      });
+    const selected = participants.filter(
+      (p: any) => String(p.placement_snapshot.major.id) === String(majorId),
+    );
+    const responses = evaluation.responses.filter(
+      (response: any) => response.audience_major_id === majorId,
+    );
+    const label =
+      selected[0]?.placement_snapshot.major ??
+      responses[0]?.audience_major_label ??
+      null;
+    const result = this.buildEvaluationResult({
+      ...evaluation,
+      responses,
+      _count: {
+        ...evaluation._count,
+        evaluation_participants: selected.length,
+        responses: responses.length,
+      },
+    });
+    return {
+      ...result,
+      release,
+      audience_filter: {
+        major_id: String(majorId),
+        label,
+        available: true,
+        source: 'EVALUATION_TIME_SNAPSHOT',
+      },
+      combined_participant_count: evaluation._count.evaluation_participants,
+      combined_submission_count: evaluation._count.responses,
+    };
+  }
 
   private buildEvaluationResult(evaluation: any) {
     const offering = evaluation.course_offerings;

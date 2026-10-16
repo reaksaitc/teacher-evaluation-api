@@ -34,6 +34,8 @@ export async function loadTargetLabels(
         select: {
           id: true,
           name: true,
+          major_id: true,
+          generation_number: true,
           starting_year_level: true,
           entry_academic_year: {
             select: { id: true, name: true, start_year: true },
@@ -50,7 +52,12 @@ export async function loadTargetLabels(
       generation_id: String(generation.id),
       historical_labels: {
         schema_version: 1,
-        generation: { id: String(generation.id), name: generation.name },
+        generation: {
+          id: String(generation.id),
+          name: generation.name,
+          major_id: generation.major_id?.toString() ?? null,
+          generation_number: generation.generation_number,
+        },
         entry_academic_year: {
           id: String(generation.entry_academic_year.id),
           name: generation.entry_academic_year.name,
@@ -91,7 +98,12 @@ export async function loadTargetLabels(
             name: year.name,
             start_year: year.start_year,
           },
-          generation: { id: String(generation.id), name: generation.name },
+          generation: {
+            id: String(generation.id),
+            name: generation.name,
+            major_id: generation.major_id?.toString() ?? null,
+            generation_number: generation.generation_number,
+          },
           major: { id: String(major.id), code: major.code, name: major.name },
           year_level: scope.year_level,
           class_group: classGroup,

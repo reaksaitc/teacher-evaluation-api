@@ -1,5 +1,9 @@
 # Assessment / Teaching Evaluation System — Backend
 
+For the latest backend implementation of `improve.txt` A–S, use the [backend alignment contracts](docs/BACKEND_ALIGNMENT_CONTRACTS.md). They document the new APIs, capabilities, migrations, privacy policy, and frontend handoff. These changes have been tested in an isolated database; they have not been deployed to an existing installation. Older database/test counts below describe the earlier delivery.
+
+Latest verification (2026-10-17): **546 unit/controller tests and 498 API tests passed**, with TypeScript and build checks passing. Lint has no errors and four existing warnings. The existing CLOSED-only lecturer release rule remains; an institution-approved minimum-response/small-cohort policy is still pending.
+
 For professor review and frontend handoff, read the [consolidated project report](docs/BACKEND_PROJECT_REPORT.md) or its [Word version](docs/BACKEND_PROJECT_REPORT.docx).
 
 For frontend testing, start with the [handoff checklist and request examples](docs/BACKEND_PROJECT_REPORT.md#88-frontend-team-handoff-and-acceptance-checklist) and [isolated setup guide](TESTING.md#frontend-team-preview-from-the-github-repository). Clone the delivery commit identified by the project owner; the earlier `578c63f` baseline does not contain these improvements.
@@ -187,18 +191,18 @@ PostgreSQL stores the persistent application data.
 
 # 3. Technology Stack
 
-| Area | Technology |
-|---|---|
-| Backend Framework | NestJS |
-| Language | TypeScript |
-| Database | PostgreSQL |
-| ORM | Prisma |
-| Authentication | JWT + Passport |
-| Password Hashing | bcrypt |
-| Validation | class-validator + class-transformer |
-| API Documentation | Swagger |
-| Testing | Jest + ts-jest |
-| HTTP / E2E Testing | Supertest |
+| Area               | Technology                          |
+| ------------------ | ----------------------------------- |
+| Backend Framework  | NestJS                              |
+| Language           | TypeScript                          |
+| Database           | PostgreSQL                          |
+| ORM                | Prisma                              |
+| Authentication     | JWT + Passport                      |
+| Password Hashing   | bcrypt                              |
+| Validation         | class-validator + class-transformer |
+| API Documentation  | Swagger                             |
+| Testing            | Jest + ts-jest                      |
+| HTTP / E2E Testing | Supertest                           |
 
 API base path:
 
@@ -1389,29 +1393,29 @@ The lecturer should not receive student identity attached to final response cont
 
 # 16. Important Business Rules
 
-| Rule | Backend Behaviour |
-|---|---|
-| Active account | Operations requiring an active user reject inactive accounts |
-| Enrollment eligibility | New enrollment requires a valid eligible student |
-| Duplicate enrollment | Same student cannot be enrolled twice in the same offering |
-| Group enrollment | Preview is reviewed before explicit enrollment rows are confirmed |
-| Evaluation lifecycle | Main lifecycle is DRAFT → OPEN → CLOSED |
-| Schedule editing | Protected according to evaluation lifecycle |
-| Participant eligibility | Student must satisfy enrollment and participant rules |
-| Evaluation time | Answering is allowed only during the permitted evaluation window |
-| Submit once | One final submission per participant/evaluation |
-| Effective version | Student questionnaire uses participant version with historical evaluation fallback |
-| Draft version safety | Saved drafts remain tied to their exact questionnaire version |
-| Completed history | Completed responses keep their original version |
-| Pending version update | Only safe unfinished/no-draft participants may move |
-| Question locking | Used/protected questionnaire versions cannot be freely mutated |
-| Required answers | Required questions must be answered |
-| Rating bounds | Rating must be within configured bounds |
-| Option validation | Submitted option IDs must belong to the correct question |
-| Anonymous response | Final response content does not directly store student identity |
-| Transaction safety | Final submission operations succeed or fail together |
-| Lecturer ownership | Lecturer access is restricted to permitted own-course/evaluation data |
-| Admin control | Administrative operations require appropriate authorization |
+| Rule                    | Backend Behaviour                                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------- |
+| Active account          | Operations requiring an active user reject inactive accounts                       |
+| Enrollment eligibility  | New enrollment requires a valid eligible student                                   |
+| Duplicate enrollment    | Same student cannot be enrolled twice in the same offering                         |
+| Group enrollment        | Preview is reviewed before explicit enrollment rows are confirmed                  |
+| Evaluation lifecycle    | Main lifecycle is DRAFT → OPEN → CLOSED                                            |
+| Schedule editing        | Protected according to evaluation lifecycle                                        |
+| Participant eligibility | Student must satisfy enrollment and participant rules                              |
+| Evaluation time         | Answering is allowed only during the permitted evaluation window                   |
+| Submit once             | One final submission per participant/evaluation                                    |
+| Effective version       | Student questionnaire uses participant version with historical evaluation fallback |
+| Draft version safety    | Saved drafts remain tied to their exact questionnaire version                      |
+| Completed history       | Completed responses keep their original version                                    |
+| Pending version update  | Only safe unfinished/no-draft participants may move                                |
+| Question locking        | Used/protected questionnaire versions cannot be freely mutated                     |
+| Required answers        | Required questions must be answered                                                |
+| Rating bounds           | Rating must be within configured bounds                                            |
+| Option validation       | Submitted option IDs must belong to the correct question                           |
+| Anonymous response      | Final response content does not directly store student identity                    |
+| Transaction safety      | Final submission operations succeed or fail together                               |
+| Lecturer ownership      | Lecturer access is restricted to permitted own-course/evaluation data              |
+| Admin control           | Administrative operations require appropriate authorization                        |
 
 ---
 
@@ -1636,16 +1640,16 @@ Authorization: Bearer <JWT>
 
 Common HTTP status categories:
 
-| Status | Meaning |
-|---|---|
-| 200 | Successful request |
-| 201 | Resource created / operation completed |
-| 204 | Successful operation with no response body |
-| 400 | Invalid input or invalid request setup |
-| 401 | Missing, expired, revoked, or invalid authentication |
-| 403 | Authenticated but not permitted/eligible |
-| 404 | Requested resource does not exist |
-| 409 | Request conflicts with the current resource/state |
+| Status | Meaning                                              |
+| ------ | ---------------------------------------------------- |
+| 200    | Successful request                                   |
+| 201    | Resource created / operation completed               |
+| 204    | Successful operation with no response body           |
+| 400    | Invalid input or invalid request setup               |
+| 401    | Missing, expired, revoked, or invalid authentication |
+| 403    | Authenticated but not permitted/eligible             |
+| 404    | Requested resource does not exist                    |
+| 409    | Request conflicts with the current resource/state    |
 
 Swagger is the preferred source for the exact current endpoint and DTO contract.
 
@@ -2282,19 +2286,19 @@ These are future enhancements and do not require a large pre-defense database re
 
 Some implementation choices evolved during development.
 
-| Earlier / Original Direction | Current Implementation |
-|---|---|
-| TypeORM | Prisma |
-| UUID-oriented design | BigInt auto-increment IDs |
-| `/api/v1/admin/...` style | `/api/...` |
-| PATCH-oriented updates | PUT used where implemented |
-| argon2 | bcrypt |
-| Application-specific error codes | Standard NestJS HTTP exceptions/messages |
-| Simpler student representation | User + Student Profile + Academic Records |
-| Basic reusable survey | Named Survey + Survey Versions |
-| Simple enrollment | Individual + preview/confirm group enrollment |
-| Basic evaluation assignment | Participant scope + eligibility preview/confirmation |
-| Simple submission | Draft-aware, version-aware transactional anonymous submission |
+| Earlier / Original Direction     | Current Implementation                                        |
+| -------------------------------- | ------------------------------------------------------------- |
+| TypeORM                          | Prisma                                                        |
+| UUID-oriented design             | BigInt auto-increment IDs                                     |
+| `/api/v1/admin/...` style        | `/api/...`                                                    |
+| PATCH-oriented updates           | PUT used where implemented                                    |
+| argon2                           | bcrypt                                                        |
+| Application-specific error codes | Standard NestJS HTTP exceptions/messages                      |
+| Simpler student representation   | User + Student Profile + Academic Records                     |
+| Basic reusable survey            | Named Survey + Survey Versions                                |
+| Simple enrollment                | Individual + preview/confirm group enrollment                 |
+| Basic evaluation assignment      | Participant scope + eligibility preview/confirmation          |
+| Simple submission                | Draft-aware, version-aware transactional anonymous submission |
 
 These are implementation decisions made as the actual backend architecture evolved.
 

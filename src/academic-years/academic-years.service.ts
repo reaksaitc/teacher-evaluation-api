@@ -1,3 +1,4 @@
+import { AcademicYearSetupService } from './academic-year-setup.service';
 import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import { calendarDate } from '../common/utils/calendar-date.util';
 import { throwKnownDatabaseConstraint } from '../common/utils/database-constraint.util';
@@ -33,60 +34,8 @@ export class AcademicYearsService {
     return academicYear;
   }
 
-  async create(dto: CreateAcademicYearDto) {
-    return inSerializableTransaction(
-      this.prisma,
-      (db) => new AcademicYearsService(db).createInTransaction(dto),
-      (e: any) => {
-        throwKnownDatabaseConstraint(e);
-        if (e.code === 'P2002') {
-          throw new ConflictException('Academic year already exists');
-        }
-
-        throw e;
-      },
-    );
-  }
-
-  private async createInTransaction(dto: CreateAcademicYearDto) {
-    const startDate = calendarDate(dto.start_date);
-    const endDate = calendarDate(dto.end_date);
-
-    this.checkDateOrder(startDate, endDate);
-
-    try {
-      return await this.prisma.$transaction(async (tx) => {
-        // Only one academic year should be active at a time
-        if (dto.is_active === true) {
-          await tx.academic_years.updateMany({
-            where: { is_active: true },
-            data: {
-              is_active: false,
-              updated_at: new Date(),
-            },
-          });
-        }
-
-        return tx.academic_years.create({
-          data: {
-            name: dto.name,
-            start_year: dto.start_year ?? null,
-            start_date: startDate,
-            end_date: endDate,
-            is_active: dto.is_active ?? false,
-            created_at: new Date(),
-            updated_at: new Date(),
-          },
-        });
-      });
-    } catch (e: any) {
-      throwKnownDatabaseConstraint(e);
-      if (e.code === 'P2002') {
-        throw new ConflictException('Academic year already exists');
-      }
-
-      throw e;
-    }
+  async create(dto: CreateAcademicYearDto, actorId?: bigint) {
+    return new AcademicYearSetupService(this.prisma).setup(dto, actorId ?? 0n);
   }
 
   async update(id: bigint, dto: UpdateAcademicYearDto) {
@@ -113,7 +62,9 @@ export class AcademicYearsService {
         : existing.start_date;
 
     const endDate =
-      dto.end_date !== undefined ? calendarDate(dto.end_date) : existing.end_date;
+      dto.end_date !== undefined
+        ? calendarDate(dto.end_date)
+        : existing.end_date;
 
     this.checkDateOrder(startDate, endDate);
 

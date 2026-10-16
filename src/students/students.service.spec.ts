@@ -20,6 +20,7 @@ import { StudentEvaluationProgressService } from './student-evaluation-progress.
  */
 
 type IdResult = {
+  major_id?: bigint;
   id: bigint;
 };
 
@@ -464,6 +465,12 @@ describe('StudentsService', () => {
   });
 
   describe('create', () => {
+    beforeEach(() =>
+      studentGenerationFindUniqueMock.mockResolvedValue({
+        id: 1n,
+        major_id: 1n,
+      }),
+    );
     it('should create user, student profile, and initial academic record in one transaction', async () => {
       const result = await service.create(createDto);
 
@@ -473,6 +480,7 @@ describe('StudentsService', () => {
         },
         select: {
           id: true,
+          major_id: true,
         },
       });
 
@@ -743,6 +751,7 @@ describe('StudentsService', () => {
         },
         select: {
           id: true,
+          major_id: true,
         },
       });
 
@@ -1125,6 +1134,7 @@ describe('StudentsService', () => {
     });
 
     expect(result).toEqual({
+      generation: { id: 1n },
       academic_year_id: '1',
       generation_id: '5',
       major_id: '2',
@@ -1139,6 +1149,7 @@ describe('StudentsService', () => {
     const result = await service.getGroupOptions(1n, 5n, 2n);
 
     expect(result).toEqual({
+      generation: { id: 1n },
       academic_year_id: '1',
       generation_id: '5',
       major_id: '2',

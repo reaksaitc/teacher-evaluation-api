@@ -1,3 +1,4 @@
+import { backendCapabilities } from './backend-capabilities';
 import { jest } from '@jest/globals';
 
 import {
@@ -45,39 +46,26 @@ type AcademicYearResult = {
 describe('AuthService', () => {
   let service: AuthService;
 
-  const usersFindFirstMock = jest.fn<
-    (...args: unknown[]) => Promise<TestUser | null>
-  >();
+  const usersFindFirstMock =
+    jest.fn<(...args: unknown[]) => Promise<TestUser | null>>();
 
-  const usersFindUniqueMock = jest.fn<
-    (...args: unknown[]) => Promise<any>
-  >();
+  const usersFindUniqueMock = jest.fn<(...args: unknown[]) => Promise<any>>();
 
-  const usersUpdateManyMock = jest.fn<
-    (...args: unknown[]) => Promise<{ count: number }>
-  >();
+  const usersUpdateManyMock =
+    jest.fn<(...args: unknown[]) => Promise<{ count: number }>>();
 
-  const studentsFindUniqueMock = jest.fn<
-    (
-      ...args: unknown[]
-    ) => Promise<
-      StudentWithUser | StudentIdResult | null
-    >
-  >();
+  const studentsFindUniqueMock =
+    jest.fn<
+      (...args: unknown[]) => Promise<StudentWithUser | StudentIdResult | null>
+    >();
 
-  const academicYearsFindFirstMock = jest.fn<
-    (
-      ...args: unknown[]
-    ) => Promise<AcademicYearResult | null>
-  >();
+  const academicYearsFindFirstMock =
+    jest.fn<(...args: unknown[]) => Promise<AcademicYearResult | null>>();
 
-  const studentsServiceFindOneMock = jest.fn<
-    (...args: unknown[]) => Promise<any>
-  >();
+  const studentsServiceFindOneMock =
+    jest.fn<(...args: unknown[]) => Promise<any>>();
 
-  const jwtSignAsyncMock = jest.fn<
-    (...args: unknown[]) => Promise<string>
-  >();
+  const jwtSignAsyncMock = jest.fn<(...args: unknown[]) => Promise<string>>();
 
   const prismaMock = {
     users: {
@@ -148,10 +136,7 @@ describe('AuthService', () => {
   };
 
   beforeAll(async () => {
-    passwordHash = await bcrypt.hash(
-      password,
-      10,
-    );
+    passwordHash = await bcrypt.hash(password, 10);
 
     adminUser.password_hash = passwordHash;
     studentUser.password_hash = passwordHash;
@@ -160,9 +145,7 @@ describe('AuthService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
 
-    jwtSignAsyncMock.mockResolvedValue(
-      'test-access-token',
-    );
+    jwtSignAsyncMock.mockResolvedValue('test-access-token');
 
     /*
      * A successful compare-and-swap password update
@@ -172,27 +155,25 @@ describe('AuthService', () => {
       count: 1,
     });
 
-    const module: TestingModule =
-      await Test.createTestingModule({
-        providers: [
-          AuthService,
-          {
-            provide: PrismaService,
-            useValue: prismaMock,
-          },
-          {
-            provide: JwtService,
-            useValue: jwtMock,
-          },
-          {
-            provide: StudentsService,
-            useValue: studentsServiceMock,
-          },
-        ],
-      }).compile();
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AuthService,
+        {
+          provide: PrismaService,
+          useValue: prismaMock,
+        },
+        {
+          provide: JwtService,
+          useValue: jwtMock,
+        },
+        {
+          provide: StudentsService,
+          useValue: studentsServiceMock,
+        },
+      ],
+    }).compile();
 
-    service =
-      module.get<AuthService>(AuthService);
+    service = module.get<AuthService>(AuthService);
   });
 
   it('should be defined', () => {
@@ -201,30 +182,22 @@ describe('AuthService', () => {
 
   describe('login', () => {
     it('should log in admin/staff using email', async () => {
-      usersFindFirstMock.mockResolvedValue(
-        adminUser,
-      );
+      usersFindFirstMock.mockResolvedValue(adminUser);
 
       const result = await service.login({
         identifier: ' ADMIN@ITC.EDU.KH ',
         password,
       });
 
-      expect(
-        usersFindFirstMock,
-      ).toHaveBeenCalledWith({
+      expect(usersFindFirstMock).toHaveBeenCalledWith({
         where: {
           email: 'admin@itc.edu.kh',
         },
       });
 
-      expect(
-        studentsFindUniqueMock,
-      ).not.toHaveBeenCalled();
+      expect(studentsFindUniqueMock).not.toHaveBeenCalled();
 
-      expect(
-        jwtSignAsyncMock,
-      ).toHaveBeenCalledWith({
+      expect(jwtSignAsyncMock).toHaveBeenCalledWith({
         sub: '1',
         email: 'admin@itc.edu.kh',
         role: 'ADMIN',
@@ -234,6 +207,7 @@ describe('AuthService', () => {
       expect(result).toEqual({
         access_token: 'test-access-token',
         user: {
+          capabilities: backendCapabilities,
           id: '1',
           email: 'admin@itc.edu.kh',
           full_name: 'System Admin',
@@ -253,9 +227,7 @@ describe('AuthService', () => {
         password,
       });
 
-      expect(
-        studentsFindUniqueMock,
-      ).toHaveBeenCalledWith({
+      expect(studentsFindUniqueMock).toHaveBeenCalledWith({
         where: {
           student_code: 'e20221111',
         },
@@ -264,13 +236,9 @@ describe('AuthService', () => {
         },
       });
 
-      expect(
-        usersFindFirstMock,
-      ).not.toHaveBeenCalled();
+      expect(usersFindFirstMock).not.toHaveBeenCalled();
 
-      expect(
-        jwtSignAsyncMock,
-      ).toHaveBeenCalledWith({
+      expect(jwtSignAsyncMock).toHaveBeenCalledWith({
         sub: '73',
         email: null,
         role: 'STUDENT',
@@ -280,6 +248,7 @@ describe('AuthService', () => {
       expect(result).toEqual({
         access_token: 'test-access-token',
         user: {
+          capabilities: backendCapabilities,
           id: '73',
           email: null,
           full_name: 'Test Student',
@@ -298,20 +267,14 @@ describe('AuthService', () => {
           password,
         }),
       ).rejects.toThrow(
-        new UnauthorizedException(
-          'Invalid identifier or password',
-        ),
+        new UnauthorizedException('Invalid identifier or password'),
       );
 
-      expect(
-        jwtSignAsyncMock,
-      ).not.toHaveBeenCalled();
+      expect(jwtSignAsyncMock).not.toHaveBeenCalled();
     });
 
     it('should reject an unknown student code', async () => {
-      studentsFindUniqueMock.mockResolvedValue(
-        null,
-      );
+      studentsFindUniqueMock.mockResolvedValue(null);
 
       await expect(
         service.login({
@@ -319,20 +282,14 @@ describe('AuthService', () => {
           password,
         }),
       ).rejects.toThrow(
-        new UnauthorizedException(
-          'Invalid identifier or password',
-        ),
+        new UnauthorizedException('Invalid identifier or password'),
       );
 
-      expect(
-        jwtSignAsyncMock,
-      ).not.toHaveBeenCalled();
+      expect(jwtSignAsyncMock).not.toHaveBeenCalled();
     });
 
     it('should reject an incorrect password', async () => {
-      usersFindFirstMock.mockResolvedValue(
-        adminUser,
-      );
+      usersFindFirstMock.mockResolvedValue(adminUser);
 
       await expect(
         service.login({
@@ -340,14 +297,10 @@ describe('AuthService', () => {
           password: 'WrongPassword',
         }),
       ).rejects.toThrow(
-        new UnauthorizedException(
-          'Invalid identifier or password',
-        ),
+        new UnauthorizedException('Invalid identifier or password'),
       );
 
-      expect(
-        jwtSignAsyncMock,
-      ).not.toHaveBeenCalled();
+      expect(jwtSignAsyncMock).not.toHaveBeenCalled();
     });
 
     it('should reject an inactive account', async () => {
@@ -365,15 +318,9 @@ describe('AuthService', () => {
           identifier: 'e20221111',
           password,
         }),
-      ).rejects.toThrow(
-        new ForbiddenException(
-          'Account is not active',
-        ),
-      );
+      ).rejects.toThrow(new ForbiddenException('Account is not active'));
 
-      expect(
-        jwtSignAsyncMock,
-      ).not.toHaveBeenCalled();
+      expect(jwtSignAsyncMock).not.toHaveBeenCalled();
     });
   });
 
@@ -393,8 +340,7 @@ describe('AuthService', () => {
             departments: {
               id: BigInt(2),
               code: 'AMS',
-              name:
-                'Applied Mathematics & Statistics',
+              name: 'Applied Mathematics & Statistics',
             },
           },
           {
@@ -402,20 +348,15 @@ describe('AuthService', () => {
             departments: {
               id: BigInt(3),
               code: 'GIC',
-              name:
-                'Information and Communication Engineering',
+              name: 'Information and Communication Engineering',
             },
           },
         ],
       });
 
-      const result = await service.getMe(
-        BigInt(1),
-      );
+      const result = await service.getMe(BigInt(1));
 
-      expect(
-        usersFindUniqueMock,
-      ).toHaveBeenCalledWith({
+      expect(usersFindUniqueMock).toHaveBeenCalledWith({
         where: {
           id: BigInt(1),
         },
@@ -467,8 +408,7 @@ describe('AuthService', () => {
             department: {
               id: BigInt(2),
               code: 'AMS',
-              name:
-                'Applied Mathematics & Statistics',
+              name: 'Applied Mathematics & Statistics',
             },
           },
           {
@@ -476,28 +416,19 @@ describe('AuthService', () => {
             department: {
               id: BigInt(3),
               code: 'GIC',
-              name:
-                'Information and Communication Engineering',
+              name: 'Information and Communication Engineering',
             },
           },
         ],
 
-        capabilities: {
-          change_password: true,
-        },
+        capabilities: backendCapabilities,
       });
 
-      expect(
-        studentsFindUniqueMock,
-      ).not.toHaveBeenCalled();
+      expect(studentsFindUniqueMock).not.toHaveBeenCalled();
 
-      expect(
-        academicYearsFindFirstMock,
-      ).not.toHaveBeenCalled();
+      expect(academicYearsFindFirstMock).not.toHaveBeenCalled();
 
-      expect(
-        studentsServiceFindOneMock,
-      ).not.toHaveBeenCalled();
+      expect(studentsServiceFindOneMock).not.toHaveBeenCalled();
     });
 
     it('should return student generation and effective placement for the newest active academic year', async () => {
@@ -515,9 +446,7 @@ describe('AuthService', () => {
         id: BigInt(1),
       });
 
-      academicYearsFindFirstMock.mockResolvedValueOnce(
-        activeAcademicYear,
-      );
+      academicYearsFindFirstMock.mockResolvedValueOnce(activeAcademicYear);
 
       studentsServiceFindOneMock.mockResolvedValue({
         id: BigInt(1),
@@ -534,8 +463,7 @@ describe('AuthService', () => {
 
           effective_year_level: 3,
 
-          year_level_source:
-            'EXPLICIT_ACADEMIC_RECORD',
+          year_level_source: 'EXPLICIT_ACADEMIC_RECORD',
 
           academic_record: {
             id: BigInt(20),
@@ -544,25 +472,18 @@ describe('AuthService', () => {
             majors: {
               id: BigInt(1),
               code: 'AMS',
-              name:
-                'Applied Mathematics & Statistics',
+              name: 'Applied Mathematics & Statistics',
               department_id: BigInt(2),
             },
           },
         },
       });
 
-      const result = await service.getMe(
-        BigInt(73),
-      );
+      const result = await service.getMe(BigInt(73));
 
-      expect(
-        academicYearsFindFirstMock,
-      ).toHaveBeenCalledTimes(1);
+      expect(academicYearsFindFirstMock).toHaveBeenCalledTimes(1);
 
-      expect(
-        academicYearsFindFirstMock,
-      ).toHaveBeenCalledWith({
+      expect(academicYearsFindFirstMock).toHaveBeenCalledWith({
         where: {
           is_active: true,
         },
@@ -584,12 +505,7 @@ describe('AuthService', () => {
         },
       });
 
-      expect(
-        studentsServiceFindOneMock,
-      ).toHaveBeenCalledWith(
-        BigInt(1),
-        '5',
-      );
+      expect(studentsServiceFindOneMock).toHaveBeenCalledWith(BigInt(1), '5');
 
       expect(result).toEqual({
         id: BigInt(73),
@@ -600,9 +516,15 @@ describe('AuthService', () => {
         gender: 'FEMALE',
 
         student: {
+          academic_context: expect.objectContaining({
+            effective_year_level: 3,
+          }),
           student_code: 'e20221111',
 
           generation: {
+            major_id: null,
+            generation_number: null,
+            major: null,
             id: BigInt(10),
             name: 'Generation 43',
           },
@@ -611,8 +533,7 @@ describe('AuthService', () => {
             major: {
               id: BigInt(1),
               code: 'AMS',
-              name:
-                'Applied Mathematics & Statistics',
+              name: 'Applied Mathematics & Statistics',
             },
 
             year_level: 3,
@@ -629,9 +550,7 @@ describe('AuthService', () => {
           name: '2026-2027',
         },
 
-        capabilities: {
-          change_password: true,
-        },
+        capabilities: backendCapabilities,
       });
     });
 
@@ -650,9 +569,7 @@ describe('AuthService', () => {
         id: BigInt(1),
       });
 
-      academicYearsFindFirstMock.mockResolvedValueOnce(
-        activeAcademicYear,
-      );
+      academicYearsFindFirstMock.mockResolvedValueOnce(activeAcademicYear);
 
       studentsServiceFindOneMock.mockResolvedValue({
         student_code: 'e20221111',
@@ -671,13 +588,9 @@ describe('AuthService', () => {
 
       await service.getMe(BigInt(73));
 
-      expect(
-        academicYearsFindFirstMock,
-      ).toHaveBeenCalledTimes(1);
+      expect(academicYearsFindFirstMock).toHaveBeenCalledTimes(1);
 
-      expect(
-        academicYearsFindFirstMock,
-      ).toHaveBeenCalledWith(
+      expect(academicYearsFindFirstMock).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
             is_active: true,
@@ -712,9 +625,7 @@ describe('AuthService', () => {
 
       academicYearsFindFirstMock
         .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(
-          fallbackAcademicYear,
-        );
+        .mockResolvedValueOnce(fallbackAcademicYear);
 
       studentsServiceFindOneMock.mockResolvedValue({
         student_code: 'e20221111',
@@ -725,13 +636,11 @@ describe('AuthService', () => {
         },
 
         academic_context: {
-          academic_year:
-            fallbackAcademicYear,
+          academic_year: fallbackAcademicYear,
 
           effective_year_level: 2,
 
-          year_level_source:
-            'EXPLICIT_ACADEMIC_RECORD',
+          year_level_source: 'EXPLICIT_ACADEMIC_RECORD',
 
           academic_record: {
             id: BigInt(20),
@@ -740,94 +649,69 @@ describe('AuthService', () => {
             majors: {
               id: BigInt(1),
               code: 'AMS',
-              name:
-                'Applied Mathematics & Statistics',
+              name: 'Applied Mathematics & Statistics',
               department_id: BigInt(2),
             },
           },
         },
       });
 
-      const result = await service.getMe(
-        BigInt(73),
-      );
+      const result = await service.getMe(BigInt(73));
 
-      expect(
-        academicYearsFindFirstMock,
-      ).toHaveBeenCalledTimes(2);
+      expect(academicYearsFindFirstMock).toHaveBeenCalledTimes(2);
 
-      expect(
-        academicYearsFindFirstMock,
-      ).toHaveBeenNthCalledWith(
-        1,
-        {
-          where: {
-            is_active: true,
-          },
-
-          orderBy: [
-            {
-              start_year: 'desc',
-            },
-            {
-              id: 'desc',
-            },
-          ],
-
-          select: {
-            id: true,
-            name: true,
-            start_year: true,
-            is_active: true,
-          },
+      expect(academicYearsFindFirstMock).toHaveBeenNthCalledWith(1, {
+        where: {
+          is_active: true,
         },
-      );
 
-      expect(
-        academicYearsFindFirstMock,
-      ).toHaveBeenNthCalledWith(
-        2,
-        {
-          orderBy: [
-            {
-              start_year: 'desc',
-            },
-            {
-              id: 'desc',
-            },
-          ],
-
-          select: {
-            id: true,
-            name: true,
-            start_year: true,
-            is_active: true,
+        orderBy: [
+          {
+            start_year: 'desc',
           },
+          {
+            id: 'desc',
+          },
+        ],
+
+        select: {
+          id: true,
+          name: true,
+          start_year: true,
+          is_active: true,
         },
-      );
+      });
 
-      expect(
-        studentsServiceFindOneMock,
-      ).toHaveBeenCalledWith(
-        BigInt(1),
-        '4',
-      );
+      expect(academicYearsFindFirstMock).toHaveBeenNthCalledWith(2, {
+        orderBy: [
+          {
+            start_year: 'desc',
+          },
+          {
+            id: 'desc',
+          },
+        ],
 
-      expect(
-        result.profile_academic_year,
-      ).toEqual({
+        select: {
+          id: true,
+          name: true,
+          start_year: true,
+          is_active: true,
+        },
+      });
+
+      expect(studentsServiceFindOneMock).toHaveBeenCalledWith(BigInt(1), '4');
+
+      expect(result.profile_academic_year).toEqual({
         id: BigInt(4),
         name: '2025-2026',
       });
 
-      expect(
-        result.student?.effective_placement,
-      ).toEqual({
+      expect(result.student?.effective_placement).toEqual({
         major: {
           id: BigInt(1),
           code: 'AMS',
-          name:
-            'Applied Mathematics & Statistics',
+          name: 'Applied Mathematics & Statistics',
         },
 
         year_level: 2,
@@ -854,9 +738,7 @@ describe('AuthService', () => {
         id: BigInt(1),
       });
 
-      academicYearsFindFirstMock.mockResolvedValueOnce(
-        activeAcademicYear,
-      );
+      academicYearsFindFirstMock.mockResolvedValueOnce(activeAcademicYear);
 
       studentsServiceFindOneMock.mockResolvedValue({
         student_code: 'e20221111',
@@ -871,20 +753,15 @@ describe('AuthService', () => {
 
           effective_year_level: 3,
 
-          year_level_source:
-            'GENERATION_CALCULATION',
+          year_level_source: 'GENERATION_CALCULATION',
 
           academic_record: null,
         },
       });
 
-      const result = await service.getMe(
-        BigInt(73),
-      );
+      const result = await service.getMe(BigInt(73));
 
-      expect(
-        result.student?.effective_placement,
-      ).toEqual({
+      expect(result.student?.effective_placement).toEqual({
         major: null,
         year_level: 3,
 
@@ -925,19 +802,11 @@ describe('AuthService', () => {
         },
       });
 
-      const result = await service.getMe(
-        BigInt(73),
-      );
+      const result = await service.getMe(BigInt(73));
 
-      expect(
-        academicYearsFindFirstMock,
-      ).toHaveBeenCalledTimes(2);
+      expect(academicYearsFindFirstMock).toHaveBeenCalledTimes(2);
 
-      expect(
-        studentsServiceFindOneMock,
-      ).toHaveBeenCalledWith(
-        BigInt(1),
-      );
+      expect(studentsServiceFindOneMock).toHaveBeenCalledWith(BigInt(1));
 
       expect(result).toEqual({
         id: BigInt(73),
@@ -964,9 +833,7 @@ describe('AuthService', () => {
 
         profile_academic_year: null,
 
-        capabilities: {
-          change_password: true,
-        },
+        capabilities: backendCapabilities,
       });
     });
 
@@ -981,13 +848,9 @@ describe('AuthService', () => {
         user_departments: [],
       });
 
-      studentsFindUniqueMock.mockResolvedValue(
-        null,
-      );
+      studentsFindUniqueMock.mockResolvedValue(null);
 
-      const result = await service.getMe(
-        BigInt(73),
-      );
+      const result = await service.getMe(BigInt(73));
 
       expect(result).toEqual({
         id: BigInt(73),
@@ -1001,18 +864,12 @@ describe('AuthService', () => {
 
         profile_academic_year: null,
 
-        capabilities: {
-          change_password: true,
-        },
+        capabilities: backendCapabilities,
       });
 
-      expect(
-        academicYearsFindFirstMock,
-      ).not.toHaveBeenCalled();
+      expect(academicYearsFindFirstMock).not.toHaveBeenCalled();
 
-      expect(
-        studentsServiceFindOneMock,
-      ).not.toHaveBeenCalled();
+      expect(studentsServiceFindOneMock).not.toHaveBeenCalled();
     });
 
     it('should return a safe fallback if StudentsService does not provide academic_context', async () => {
@@ -1030,9 +887,7 @@ describe('AuthService', () => {
         id: BigInt(1),
       });
 
-      academicYearsFindFirstMock.mockResolvedValueOnce(
-        activeAcademicYear,
-      );
+      academicYearsFindFirstMock.mockResolvedValueOnce(activeAcademicYear);
 
       studentsServiceFindOneMock.mockResolvedValue({
         student_code: 'e20221111',
@@ -1043,9 +898,7 @@ describe('AuthService', () => {
         },
       });
 
-      const result = await service.getMe(
-        BigInt(73),
-      );
+      const result = await service.getMe(BigInt(73));
 
       expect(result).toEqual({
         id: BigInt(73),
@@ -1079,36 +932,22 @@ describe('AuthService', () => {
           name: '2026-2027',
         },
 
-        capabilities: {
-          change_password: true,
-        },
+        capabilities: backendCapabilities,
       });
     });
 
     it('should throw NotFoundException when authenticated user no longer exists', async () => {
-      usersFindUniqueMock.mockResolvedValue(
-        null,
+      usersFindUniqueMock.mockResolvedValue(null);
+
+      await expect(service.getMe(BigInt(999))).rejects.toThrow(
+        new NotFoundException('User not found'),
       );
 
-      await expect(
-        service.getMe(BigInt(999)),
-      ).rejects.toThrow(
-        new NotFoundException(
-          'User not found',
-        ),
-      );
+      expect(studentsFindUniqueMock).not.toHaveBeenCalled();
 
-      expect(
-        studentsFindUniqueMock,
-      ).not.toHaveBeenCalled();
+      expect(academicYearsFindFirstMock).not.toHaveBeenCalled();
 
-      expect(
-        academicYearsFindFirstMock,
-      ).not.toHaveBeenCalled();
-
-      expect(
-        studentsServiceFindOneMock,
-      ).not.toHaveBeenCalled();
+      expect(studentsServiceFindOneMock).not.toHaveBeenCalled();
     });
   });
 
@@ -1125,19 +964,12 @@ describe('AuthService', () => {
         count: 1,
       });
 
-      const result =
-        await service.changePassword(
-          BigInt(1),
-          {
-            current_password: password,
-            new_password:
-              'NewPassword456',
-          },
-        );
+      const result = await service.changePassword(BigInt(1), {
+        current_password: password,
+        new_password: 'NewPassword456',
+      });
 
-      expect(
-        usersFindUniqueMock,
-      ).toHaveBeenCalledWith({
+      expect(usersFindUniqueMock).toHaveBeenCalledWith({
         where: {
           id: BigInt(1),
         },
@@ -1150,28 +982,24 @@ describe('AuthService', () => {
         },
       });
 
-      expect(
-        usersUpdateManyMock,
-      ).toHaveBeenCalledTimes(1);
+      expect(usersUpdateManyMock).toHaveBeenCalledTimes(1);
 
-      const updateArgument =
-        usersUpdateManyMock.mock
-          .calls[0][0] as {
-          where: {
-            id: bigint;
-            status: string;
-            password_hash: string;
-            auth_version: number;
-          };
+      const updateArgument = usersUpdateManyMock.mock.calls[0][0] as {
+        where: {
+          id: bigint;
+          status: string;
+          password_hash: string;
+          auth_version: number;
+        };
 
-          data: {
-            password_hash: string;
+        data: {
+          password_hash: string;
 
-            auth_version: {
-              increment: number;
-            };
+          auth_version: {
+            increment: number;
           };
         };
+      };
 
       /*
        * These conditions are the compare-and-swap
@@ -1185,15 +1013,11 @@ describe('AuthService', () => {
         auth_version: 3,
       });
 
-      expect(
-        updateArgument.data.auth_version,
-      ).toEqual({
+      expect(updateArgument.data.auth_version).toEqual({
         increment: 1,
       });
 
-      expect(
-        updateArgument.data.password_hash,
-      ).not.toBe(passwordHash);
+      expect(updateArgument.data.password_hash).not.toBe(passwordHash);
 
       expect(
         await bcrypt.compare(
@@ -1203,8 +1027,7 @@ describe('AuthService', () => {
       ).toBe(true);
 
       expect(result).toEqual({
-        message:
-          'Password changed successfully. Please sign in again.',
+        message: 'Password changed successfully. Please sign in again.',
       });
     });
 
@@ -1226,34 +1049,24 @@ describe('AuthService', () => {
       });
 
       await expect(
-        service.changePassword(
-          BigInt(1),
-          {
-            current_password: password,
-            new_password:
-              'NewPassword456',
-          },
-        ),
+        service.changePassword(BigInt(1), {
+          current_password: password,
+          new_password: 'NewPassword456',
+        }),
       ).rejects.toThrow(
-        new UnauthorizedException(
-          'Credentials changed. Please sign in again.',
-        ),
+        new UnauthorizedException('Credentials changed. Please sign in again.'),
       );
 
-      expect(
-        usersUpdateManyMock,
-      ).toHaveBeenCalledTimes(1);
+      expect(usersUpdateManyMock).toHaveBeenCalledTimes(1);
 
-      const updateArgument =
-        usersUpdateManyMock.mock
-          .calls[0][0] as {
-          where: {
-            id: bigint;
-            status: string;
-            password_hash: string;
-            auth_version: number;
-          };
+      const updateArgument = usersUpdateManyMock.mock.calls[0][0] as {
+        where: {
+          id: bigint;
+          status: string;
+          password_hash: string;
+          auth_version: number;
         };
+      };
 
       expect(updateArgument.where).toEqual({
         id: BigInt(1),
@@ -1272,24 +1085,15 @@ describe('AuthService', () => {
       });
 
       await expect(
-        service.changePassword(
-          BigInt(1),
-          {
-            current_password:
-              'WrongPassword',
-            new_password:
-              'NewPassword456',
-          },
-        ),
+        service.changePassword(BigInt(1), {
+          current_password: 'WrongPassword',
+          new_password: 'NewPassword456',
+        }),
       ).rejects.toThrow(
-        new BadRequestException(
-          'Current password is incorrect',
-        ),
+        new BadRequestException('Current password is incorrect'),
       );
 
-      expect(
-        usersUpdateManyMock,
-      ).not.toHaveBeenCalled();
+      expect(usersUpdateManyMock).not.toHaveBeenCalled();
     });
 
     it('should reject reusing the current password', async () => {
@@ -1301,22 +1105,17 @@ describe('AuthService', () => {
       });
 
       await expect(
-        service.changePassword(
-          BigInt(1),
-          {
-            current_password: password,
-            new_password: password,
-          },
-        ),
+        service.changePassword(BigInt(1), {
+          current_password: password,
+          new_password: password,
+        }),
       ).rejects.toThrow(
         new BadRequestException(
           'New password must be different from the current password',
         ),
       );
 
-      expect(
-        usersUpdateManyMock,
-      ).not.toHaveBeenCalled();
+      expect(usersUpdateManyMock).not.toHaveBeenCalled();
     });
 
     it('should reject a new password exceeding 72 UTF-8 bytes', async () => {
@@ -1325,8 +1124,7 @@ describe('AuthService', () => {
        * 19 × 4 = 76 bytes, which exceeds bcrypt's
        * 72-byte safe limit.
        */
-      const tooLongPassword =
-        '😀'.repeat(19);
+      const tooLongPassword = '😀'.repeat(19);
 
       usersFindUniqueMock.mockResolvedValue({
         id: BigInt(1),
@@ -1336,52 +1134,32 @@ describe('AuthService', () => {
       });
 
       await expect(
-        service.changePassword(
-          BigInt(1),
-          {
-            current_password: password,
-            new_password:
-              tooLongPassword,
-          },
-        ),
+        service.changePassword(BigInt(1), {
+          current_password: password,
+          new_password: tooLongPassword,
+        }),
       ).rejects.toThrow(
-        new BadRequestException(
-          'Password must not exceed 72 UTF-8 bytes',
-        ),
+        new BadRequestException('Password must not exceed 72 UTF-8 bytes'),
       );
 
-      expect(
-        usersUpdateManyMock,
-      ).not.toHaveBeenCalled();
+      expect(usersUpdateManyMock).not.toHaveBeenCalled();
     });
 
     it('should reject a current password exceeding 72 UTF-8 bytes before querying the user', async () => {
-      const tooLongPassword =
-        '😀'.repeat(19);
+      const tooLongPassword = '😀'.repeat(19);
 
       await expect(
-        service.changePassword(
-          BigInt(1),
-          {
-            current_password:
-              tooLongPassword,
-            new_password:
-              'NewPassword456',
-          },
-        ),
+        service.changePassword(BigInt(1), {
+          current_password: tooLongPassword,
+          new_password: 'NewPassword456',
+        }),
       ).rejects.toThrow(
-        new BadRequestException(
-          'Password must not exceed 72 UTF-8 bytes',
-        ),
+        new BadRequestException('Password must not exceed 72 UTF-8 bytes'),
       );
 
-      expect(
-        usersFindUniqueMock,
-      ).not.toHaveBeenCalled();
+      expect(usersFindUniqueMock).not.toHaveBeenCalled();
 
-      expect(
-        usersUpdateManyMock,
-      ).not.toHaveBeenCalled();
+      expect(usersUpdateManyMock).not.toHaveBeenCalled();
     });
 
     it('should reject an inactive account', async () => {
@@ -1393,46 +1171,26 @@ describe('AuthService', () => {
       });
 
       await expect(
-        service.changePassword(
-          BigInt(1),
-          {
-            current_password: password,
-            new_password:
-              'NewPassword456',
-          },
-        ),
-      ).rejects.toThrow(
-        new ForbiddenException(
-          'Account is not active',
-        ),
-      );
+        service.changePassword(BigInt(1), {
+          current_password: password,
+          new_password: 'NewPassword456',
+        }),
+      ).rejects.toThrow(new ForbiddenException('Account is not active'));
 
-      expect(
-        usersUpdateManyMock,
-      ).not.toHaveBeenCalled();
+      expect(usersUpdateManyMock).not.toHaveBeenCalled();
     });
 
     it('should reject a missing user', async () => {
-      usersFindUniqueMock.mockResolvedValue(
-        null,
-      );
+      usersFindUniqueMock.mockResolvedValue(null);
 
       await expect(
-        service.changePassword(
-          BigInt(999),
-          {
-            current_password: password,
-            new_password:
-              'NewPassword456',
-          },
-        ),
-      ).rejects.toThrow(
-        UnauthorizedException,
-      );
+        service.changePassword(BigInt(999), {
+          current_password: password,
+          new_password: 'NewPassword456',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
 
-      expect(
-        usersUpdateManyMock,
-      ).not.toHaveBeenCalled();
+      expect(usersUpdateManyMock).not.toHaveBeenCalled();
     });
   });
 });
